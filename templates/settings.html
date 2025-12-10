@@ -78,14 +78,9 @@
                         <div class="mb-3">
                             <label class="form-label">Gemini Model</label>
                             <select class="form-select bg-dark text-light" name="gemini_model">
-                                <optgroup label="Unlimited Quota (Live API)">
-                                    <option value="gemini-2.5-flash-live" {% if config.gemini_model == 'gemini-2.5-flash-live' %}selected{% endif %}>
-                                        Gemini 2.5 Flash Live (Unlimited - may not work)
-                                    </option>
-                                </optgroup>
-                                <optgroup label="High Quota (14,400/day)">
+                                <optgroup label="Recommended (14,400/day)">
                                     <option value="gemma-3-27b-it" {% if config.gemini_model == 'gemma-3-27b-it' %}selected{% endif %}>
-                                        Gemma 3 27B (Best quality, huge quota)
+                                        Gemma 3 27B (Best quality, huge quota) ⭐
                                     </option>
                                     <option value="gemma-3-12b-it" {% if config.gemini_model == 'gemma-3-12b-it' %}selected{% endif %}>
                                         Gemma 3 12B (Good balance)
