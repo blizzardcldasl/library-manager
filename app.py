@@ -296,30 +296,134 @@ def search_google_books(title, author=None, api_key=None):
         logger.debug(f"Google Books search failed: {e}")
         return None
 
+def search_audnexus(title, author=None):
+    """Search Audnexus API for audiobook metadata. Pulls from Audible."""
+    try:
+        import urllib.parse
+        # Audnexus search endpoint
+        query = title
+        if author:
+            query = f"{title} {author}"
+
+        url = f"https://api.audnex.us/books?title={urllib.parse.quote(query)}"
+
+        resp = requests.get(url, timeout=10, headers={'Accept': 'application/json'})
+        if resp.status_code != 200:
+            return None
+
+        data = resp.json()
+        if not data or not isinstance(data, list) or len(data) == 0:
+            return None
+
+        # Get best match
+        best = data[0]
+        result = {
+            'title': best.get('title', ''),
+            'author': best.get('authors', [{}])[0].get('name', '') if best.get('authors') else '',
+            'year': best.get('releaseDate', '')[:4] if best.get('releaseDate') else None,
+            'narrator': best.get('narrators', [{}])[0].get('name', '') if best.get('narrators') else None,
+            'source': 'audnexus'
+        }
+
+        if result['title'] and result['author']:
+            logger.info(f"Audnexus found: {result['author']} - {result['title']}")
+            return result
+        return None
+    except Exception as e:
+        logger.debug(f"Audnexus search failed: {e}")
+        return None
+
+def search_hardcover(title, author=None):
+    """Search Hardcover.app API for book metadata."""
+    try:
+        import urllib.parse
+        # Hardcover GraphQL API
+        query = title
+        if author:
+            query = f"{title} {author}"
+
+        # Hardcover uses GraphQL
+        graphql_query = {
+            "query": """
+                query SearchBooks($query: String!) {
+                    search(query: $query, limit: 5) {
+                        books {
+                            title
+                            contributions { author { name } }
+                            releaseYear
+                        }
+                    }
+                }
+            """,
+            "variables": {"query": query}
+        }
+
+        resp = requests.post(
+            "https://api.hardcover.app/v1/graphql",
+            json=graphql_query,
+            headers={'Content-Type': 'application/json'},
+            timeout=10
+        )
+
+        if resp.status_code != 200:
+            return None
+
+        data = resp.json()
+        books = data.get('data', {}).get('search', {}).get('books', [])
+
+        if not books:
+            return None
+
+        best = books[0]
+        contributions = best.get('contributions', [])
+        author_name = contributions[0].get('author', {}).get('name', '') if contributions else ''
+
+        result = {
+            'title': best.get('title', ''),
+            'author': author_name,
+            'year': best.get('releaseYear'),
+            'source': 'hardcover'
+        }
+
+        if result['title'] and result['author']:
+            logger.info(f"Hardcover found: {result['author']} - {result['title']}")
+            return result
+        return None
+    except Exception as e:
+        logger.debug(f"Hardcover search failed: {e}")
+        return None
+
 def lookup_book_metadata(messy_name, config):
-    """Try to look up book metadata from APIs before falling back to AI."""
+    """Try to look up book metadata from multiple APIs, cycling through until found."""
     clean_title = clean_search_title(messy_name)
 
     if not clean_title or len(clean_title) < 3:
         return None
 
-    # Try OpenLibrary first (free, no key needed)
+    logger.debug(f"Looking up metadata for: {clean_title}")
+
+    # 1. Try Audnexus first (best for audiobooks, pulls from Audible)
+    result = search_audnexus(clean_title)
+    if result:
+        return result
+
+    # 2. Try OpenLibrary (free, huge database)
     result = search_openlibrary(clean_title)
     if result:
         return result
 
-    # Try Google Books if we have an API key
+    # 3. Try Google Books
     google_key = config.get('google_books_api_key')
-    if google_key:
-        result = search_google_books(clean_title, api_key=google_key)
-        if result:
-            return result
-    else:
-        # Try without API key (limited but works)
-        result = search_google_books(clean_title)
-        if result:
-            return result
+    result = search_google_books(clean_title, api_key=google_key)
+    if result:
+        return result
 
+    # 4. Try Hardcover.app (modern Goodreads alternative)
+    result = search_hardcover(clean_title)
+    if result:
+        return result
+
+    logger.debug(f"No API results for: {clean_title}")
     return None
 
 # ============== AI API ==============
