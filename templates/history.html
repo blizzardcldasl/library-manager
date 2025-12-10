@@ -50,7 +50,7 @@
                     <td><i class="bi bi-arrow-right text-info"></i></td>
                     <td title="{{ h.new_path }}">
                         {% set path_parts = h.new_path.split('/') %}
-                        {% set rel_path = '/'.join(path_parts[-3:]) if path_parts|length >= 6 else '/'.join(path_parts[-2:]) %}
+                        {% set rel_path = '/'.join(path_parts[-3:]) if path_parts|length >= 7 else '/'.join(path_parts[-2:]) %}
                         <strong class="text-success">{{ h.new_author }}</strong><br>
                         <small class="text-info">{{ rel_path }}</small>
                     </td>

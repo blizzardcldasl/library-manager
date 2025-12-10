@@ -11,7 +11,7 @@ Features:
 - Multi-provider AI (Gemini, OpenRouter, Ollama)
 """
 
-APP_VERSION = "0.9.0-beta.4"
+APP_VERSION = "0.9.0-beta.5"
 GITHUB_REPO = "deucebucket/library-manager"  # Your GitHub repo
 
 # Versioning Guide:
@@ -1611,6 +1611,22 @@ def analyze_title(title, author):
     """Analyze title for issues, return list of issues."""
     issues = []
 
+    # Multi-book collection folder - these contain multiple books and need special handling
+    # Don't process these as single books - they need to be split first
+    # Be conservative - only flag patterns that DEFINITELY mean multiple books
+    multi_book_patterns = [
+        r'complete\s+series',           # "Complete Series"
+        r'complete\s+audio\s+collection', # "Complete Audio Collection"
+        r'\d+[-\s]?book\s+(set|box|collection)',  # "7-Book Set", "3 Book Collection"
+        r'\d+[-\s]?book\s+and\s+audio',  # "7-Book and Audio Box Set"
+        r'all\s+\d+\s+books',            # "All 9 Books"
+        r'books?\s+\d+[-\s]?\d+',        # "Books 1-9", "Book 1-3"
+    ]
+    title_lower = title.lower()
+    if any(re.search(p, title_lower) for p in multi_book_patterns):
+        issues.append("multi_book_collection")
+        return issues  # Don't bother with other checks - this needs manual handling
+
     # Author name repeated in title
     author_parts = author.lower().split()
     if len(author_parts) >= 2:
@@ -1794,6 +1810,14 @@ def deep_scan_library(config):
 
                 # Add to queue if has issues
                 if all_issues:
+                    # Skip multi-book collections - they need manual splitting, not renaming
+                    if 'multi_book_collection' in all_issues:
+                        logger.info(f"Skipping multi-book collection (needs manual split): {path}")
+                        c.execute('UPDATE books SET status = ? WHERE id = ?',
+                                  ('needs_split', book_id))
+                        conn.commit()
+                        continue
+
                     reason = "; ".join(all_issues[:3])  # First 3 issues
                     if len(all_issues) > 3:
                         reason += f" (+{len(all_issues)-3} more)"

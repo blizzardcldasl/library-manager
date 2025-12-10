@@ -2,6 +2,18 @@
 
 All notable changes to Library Manager will be documented in this file.
 
+## [0.9.0-beta.5] - 2025-12-10
+
+### Added
+- **Multi-book collection detection** - Folders containing "Complete Series", "7-Book Set", etc. are now skipped
+  - Marked as `needs_split` instead of being processed as single books
+  - Prevents mislabeling "The Expanse Complete Series" as just "Leviathan Wakes"
+- **Placeholder author handling** - "Unknown" or "Various" authors changing to real authors no longer flagged as drastic changes
+
+### Fixed
+- History display no longer shows "audiobooks/" prefix for non-series books
+- Undid bad fixes for multi-book collection folders (Expanse, Narnia)
+
 ## [0.9.0-beta.4] - 2025-12-10
 
 ### Added
