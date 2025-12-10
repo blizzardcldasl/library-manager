@@ -205,14 +205,21 @@ function refreshQueue() {
         .then(r => r.json())
         .then(data => {
             log(`Queue now has ${data.count} items`);
-            document.getElementById('queue-badge').textContent = data.count;
-            document.getElementById('queue-count').textContent = data.count;
 
+            // Safely update elements that may not exist
+            const badge = document.getElementById('queue-badge');
+            const count = document.getElementById('queue-count');
             const tbody = document.getElementById('queue-body');
+
+            if (badge) badge.textContent = data.count;
+            if (count) count.textContent = data.count;
+
             if (data.count === 0) {
-                // Show empty state
-                location.reload();
-            } else {
+                // Show empty state - only reload if we had items before
+                if (tbody && tbody.children.length > 0) {
+                    location.reload();
+                }
+            } else if (tbody) {
                 // Update table
                 tbody.innerHTML = '';
                 data.items.forEach(item => {
