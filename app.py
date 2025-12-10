@@ -313,11 +313,11 @@ def call_openrouter(prompt, config):
     return None
 
 
-def call_gemini(prompt, config):
-    """Call Google Gemini API directly."""
+def call_gemini(prompt, config, retry_count=0):
+    """Call Google Gemini API directly with automatic retry on rate limit."""
     try:
         api_key = config.get('gemini_api_key')
-        model = config.get('gemini_model', 'gemini-1.5-flash')
+        model = config.get('gemini_model', 'gemini-2.0-flash')
 
         resp = requests.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}",
@@ -334,10 +334,32 @@ def call_gemini(prompt, config):
             text = result.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
             if text:
                 return parse_json_response(text)
+        elif resp.status_code == 429 and retry_count < 3:
+            # Rate limit - parse retry time and wait
+            error_msg = explain_http_error(resp.status_code, "Gemini")
+            logger.warning(f"Gemini: {error_msg}")
+            try:
+                detail = resp.json().get('error', {}).get('message', '')
+                if detail:
+                    logger.warning(f"Gemini detail: {detail}")
+                    # Try to parse "Please retry in X.XXXs" from message
+                    import re
+                    match = re.search(r'retry in (\d+\.?\d*)s', detail)
+                    if match:
+                        wait_time = float(match.group(1)) + 5  # Add 5 sec buffer
+                        logger.info(f"Gemini: Waiting {wait_time:.0f} seconds before retry...")
+                        time.sleep(wait_time)
+                        return call_gemini(prompt, config, retry_count + 1)
+            except:
+                pass
+            # Default wait if we can't parse the time
+            wait_time = 45 * (retry_count + 1)
+            logger.info(f"Gemini: Waiting {wait_time} seconds before retry...")
+            time.sleep(wait_time)
+            return call_gemini(prompt, config, retry_count + 1)
         else:
             error_msg = explain_http_error(resp.status_code, "Gemini")
             logger.warning(f"Gemini: {error_msg}")
-            # Try to get more detail from response
             try:
                 detail = resp.json().get('error', {}).get('message', '')
                 if detail:
