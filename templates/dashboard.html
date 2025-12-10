@@ -1,0 +1,257 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - Library Manager{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card stat-card h-100">
+            <div class="card-body text-center">
+                <i class="bi bi-collection text-info" style="font-size: 2rem;"></i>
+                <div class="stat-number" id="total-books">{{ total_books }}</div>
+                <div class="text-muted">Total Books</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card stat-card h-100">
+            <div class="card-body text-center">
+                <i class="bi bi-list-task text-warning" style="font-size: 2rem;"></i>
+                <div class="stat-number" id="queue-count">{{ queue_size }}</div>
+                <div class="text-muted">In Queue</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card stat-card h-100">
+            <div class="card-body text-center">
+                <i class="bi bi-check-circle text-success" style="font-size: 2rem;"></i>
+                <div class="stat-number" id="fixed-count">{{ fixed_count }}</div>
+                <div class="text-muted">Fixed</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card stat-card h-100">
+            <div class="card-body text-center">
+                <i class="bi bi-hourglass-split text-danger" style="font-size: 2rem;"></i>
+                <div class="stat-number">{{ pending_fixes }}</div>
+                <div class="text-muted">Pending Fixes</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-lightning"></i> Quick Actions</span>
+            </div>
+            <div class="card-body">
+                <div class="d-grid gap-2">
+                    <button class="btn btn-primary btn-lg" onclick="triggerScan()" id="scan-btn">
+                        <i class="bi bi-search"></i> Scan Library
+                    </button>
+                    <button class="btn btn-success btn-lg" onclick="processQueue()" id="process-btn">
+                        <i class="bi bi-play-fill"></i> Process Queue (1 batch)
+                    </button>
+                    {% if worker_running %}
+                    <button class="btn btn-outline-danger" onclick="stopWorker()">
+                        <i class="bi bi-stop-fill"></i> Stop Background Worker
+                    </button>
+                    {% else %}
+                    <button class="btn btn-outline-success" onclick="startWorker()">
+                        <i class="bi bi-play-fill"></i> Start Background Worker
+                    </button>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-bar-chart"></i> Stats (Last 7 Days)
+            </div>
+            <div class="card-body">
+                {% if daily_stats %}
+                <table class="table table-sm">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Scanned</th>
+                            <th>Queued</th>
+                            <th>Fixed</th>
+                            <th>API Calls</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for stat in daily_stats %}
+                        <tr>
+                            <td>{{ stat.date }}</td>
+                            <td>{{ stat.scanned or 0 }}</td>
+                            <td>{{ stat.queued or 0 }}</td>
+                            <td>{{ stat.fixed or 0 }}</td>
+                            <td>{{ stat.api_calls or 0 }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="text-muted">No stats yet. Run a scan to start tracking.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-clock-history"></i> Recent Activity
+            </div>
+            <div class="card-body">
+                {% if recent_history %}
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Original</th>
+                            <th></th>
+                            <th>Fixed To</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for h in recent_history %}
+                        <tr>
+                            <td><small>{{ h.fixed_at[:16] }}</small></td>
+                            <td>
+                                <span class="text-danger">{{ h.old_author }}</span> /
+                                <span class="text-warning">{{ h.old_title }}</span>
+                            </td>
+                            <td><i class="bi bi-arrow-right text-info"></i></td>
+                            <td>
+                                <span class="text-success">{{ h.new_author }}</span> /
+                                <span class="text-info">{{ h.new_title }}</span>
+                            </td>
+                            <td>
+                                {% if h.old_path != h.new_path %}
+                                <span class="badge badge-fix bg-danger">Fixed</span>
+                                {% else %}
+                                <span class="badge badge-pending bg-warning text-dark">Pending</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="text-muted">No fixes yet. Scan and process the queue to get started.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-gear"></i> Current Configuration
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4">
+                        <strong>Library Paths:</strong><br>
+                        {% for path in config.library_paths %}
+                        <code>{{ path }}</code><br>
+                        {% endfor %}
+                    </div>
+                    <div class="col-md-4">
+                        <strong>AI Model:</strong> {{ config.openrouter_model }}<br>
+                        <strong>Scan Interval:</strong> Every {{ config.scan_interval_hours }} hours<br>
+                        <strong>Batch Size:</strong> {{ config.batch_size }} books
+                    </div>
+                    <div class="col-md-4">
+                        <strong>Auto-Fix:</strong>
+                        {% if config.auto_fix %}
+                        <span class="badge bg-success">Enabled</span>
+                        {% else %}
+                        <span class="badge bg-warning text-dark">Manual Approval</span>
+                        {% endif %}
+                        <br>
+                        <strong>Status:</strong>
+                        {% if config.enabled %}
+                        <span class="badge bg-success">Enabled</span>
+                        {% else %}
+                        <span class="badge bg-danger">Disabled</span>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function triggerScan() {
+    const btn = document.getElementById('scan-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Scanning...';
+
+    fetch('/api/scan', {method: 'POST'})
+        .then(r => r.json())
+        .then(data => {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-search"></i> Scan Library';
+            alert(`Scan complete! Found ${data.scanned} new books, ${data.queued} added to queue.`);
+            location.reload();
+        })
+        .catch(e => {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-search"></i> Scan Library';
+            alert('Error: ' + e);
+        });
+}
+
+function processQueue() {
+    const btn = document.getElementById('process-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Processing...';
+
+    fetch('/api/process', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({limit: 3})
+    })
+        .then(r => r.json())
+        .then(data => {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-play-fill"></i> Process Queue (1 batch)';
+            alert(`Processed! ${data.fixed} books analyzed.`);
+            location.reload();
+        })
+        .catch(e => {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-play-fill"></i> Process Queue (1 batch)';
+            alert('Error: ' + e);
+        });
+}
+
+function startWorker() {
+    fetch('/api/worker/start', {method: 'POST'})
+        .then(r => r.json())
+        .then(() => location.reload());
+}
+
+function stopWorker() {
+    fetch('/api/worker/stop', {method: 'POST'})
+        .then(r => r.json())
+        .then(() => location.reload());
+}
+</script>
+{% endblock %}

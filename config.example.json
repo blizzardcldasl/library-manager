@@ -1,0 +1,11 @@
+{
+  "library_paths": [
+    "/path/to/your/audiobooks"
+  ],
+  "openrouter_model": "google/gemma-3n-e4b-it:free",
+  "scan_interval_hours": 6,
+  "batch_size": 3,
+  "max_requests_per_hour": 30,
+  "auto_fix": false,
+  "enabled": true
+}

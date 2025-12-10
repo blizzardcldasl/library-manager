@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Library Manager{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        :root {
+            --bs-body-bg: #1a1a2e;
+            --bs-body-color: #eee;
+            --bs-card-bg: #16213e;
+            --bs-border-color: #0f3460;
+        }
+        body {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+        }
+        .navbar {
+            background: rgba(15, 52, 96, 0.9) !important;
+            backdrop-filter: blur(10px);
+        }
+        .card {
+            background: rgba(22, 33, 62, 0.8);
+            border: 1px solid rgba(15, 52, 96, 0.5);
+            border-radius: 12px;
+        }
+        .card-header {
+            background: rgba(15, 52, 96, 0.5);
+            border-bottom: 1px solid rgba(15, 52, 96, 0.5);
+        }
+        .table {
+            --bs-table-bg: transparent;
+            --bs-table-color: #eee;
+        }
+        .btn-primary {
+            background: #e94560;
+            border-color: #e94560;
+        }
+        .btn-primary:hover {
+            background: #d63d56;
+            border-color: #d63d56;
+        }
+        .btn-success {
+            background: #00d9ff;
+            border-color: #00d9ff;
+            color: #000;
+        }
+        .stat-card {
+            transition: transform 0.2s;
+        }
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+        .stat-number {
+            font-size: 2.5rem;
+            font-weight: bold;
+            background: linear-gradient(45deg, #e94560, #00d9ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .badge-fix {
+            background: #e94560;
+        }
+        .badge-ok {
+            background: #00d9ff;
+            color: #000;
+        }
+        .badge-pending {
+            background: #ffc107;
+            color: #000;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .status-running {
+            background: #00ff00;
+            box-shadow: 0 0 10px #00ff00;
+            animation: pulse 2s infinite;
+        }
+        .status-stopped {
+            background: #ff0000;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .nav-link {
+            color: rgba(255,255,255,0.8) !important;
+        }
+        .nav-link:hover, .nav-link.active {
+            color: #00d9ff !important;
+        }
+        .text-muted {
+            color: rgba(255, 255, 255, 0.6) !important;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark mb-4">
+        <div class="container">
+            <a class="navbar-brand" href="/">
+                <i class="bi bi-book"></i> Library Manager
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.path == '/' %}active{% endif %}" href="/">
+                            <i class="bi bi-speedometer2"></i> Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.path == '/queue' %}active{% endif %}" href="/queue">
+                            <i class="bi bi-list-task"></i> Queue
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.path == '/history' %}active{% endif %}" href="/history">
+                            <i class="bi bi-clock-history"></i> History
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.path == '/settings' %}active{% endif %}" href="/settings">
+                            <i class="bi bi-gear"></i> Settings
+                        </a>
+                    </li>
+                </ul>
+                <div class="d-flex align-items-center">
+                    <span class="status-indicator {% if worker_running %}status-running{% else %}status-stopped{% endif %}"></span>
+                    <span class="text-light me-3">Worker: {{ 'Running' if worker_running else 'Stopped' }}</span>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        {% block content %}{% endblock %}
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        function refreshStats() {
+            fetch('/api/stats')
+                .then(r => r.json())
+                .then(data => {
+                    if (document.getElementById('queue-count')) {
+                        document.getElementById('queue-count').textContent = data.queue_size;
+                    }
+                    if (document.getElementById('fixed-count')) {
+                        document.getElementById('fixed-count').textContent = data.fixed;
+                    }
+                });
+        }
+        setInterval(refreshStats, 30000);
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

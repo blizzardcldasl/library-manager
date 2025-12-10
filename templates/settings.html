@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% block title %}Settings - Library Manager{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-gear"></i> Settings</h2>
+</div>
+
+<form method="POST">
+    <div class="row">
+        <div class="col-md-6">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <i class="bi bi-folder"></i> Library Paths
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Paths to Scan (one per line)</label>
+                        <textarea class="form-control bg-dark text-light" name="library_paths" rows="4"
+                                  placeholder="/mnt/rag_data/audiobooks">{{ config.library_paths | join('\n') }}</textarea>
+                        <small class="text-muted">Full paths to your audiobook library folders</small>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mb-4">
+                <div class="card-header">
+                    <i class="bi bi-robot"></i> AI Configuration
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">OpenRouter API Key</label>
+                        <input type="password" class="form-control bg-dark text-light" name="openrouter_api_key"
+                               value="{{ config.openrouter_api_key }}" placeholder="sk-or-v1-...">
+                        <small class="text-muted">Get free key at <a href="https://openrouter.ai" target="_blank">openrouter.ai</a></small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">AI Model</label>
+                        <select class="form-select bg-dark text-light" name="openrouter_model">
+                            <option value="google/gemma-3n-e4b-it:free" {% if config.openrouter_model == 'google/gemma-3n-e4b-it:free' %}selected{% endif %}>
+                                Google Gemma 3N (Free)
+                            </option>
+                            <option value="google/gemini-2.0-flash-exp:free" {% if config.openrouter_model == 'google/gemini-2.0-flash-exp:free' %}selected{% endif %}>
+                                Google Gemini 2.0 Flash (Free)
+                            </option>
+                            <option value="meta-llama/llama-3.3-70b-instruct:free" {% if config.openrouter_model == 'meta-llama/llama-3.3-70b-instruct:free' %}selected{% endif %}>
+                                Llama 3.3 70B (Free)
+                            </option>
+                            <option value="mistralai/devstral-2512:free" {% if config.openrouter_model == 'mistralai/devstral-2512:free' %}selected{% endif %}>
+                                Mistral Devstral (Free)
+                            </option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <i class="bi bi-clock"></i> Scheduling
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Scan Interval (hours)</label>
+                        <input type="number" class="form-control bg-dark text-light" name="scan_interval_hours"
+                               value="{{ config.scan_interval_hours }}" min="1" max="168">
+                        <small class="text-muted">How often to scan for new/changed books</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Batch Size</label>
+                        <input type="number" class="form-control bg-dark text-light" name="batch_size"
+                               value="{{ config.batch_size }}" min="1" max="10">
+                        <small class="text-muted">Books per AI request</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Max API Calls Per Hour</label>
+                        <input type="number" class="form-control bg-dark text-light" name="max_requests_per_hour"
+                               value="{{ config.max_requests_per_hour }}" min="1" max="100">
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mb-4">
+                <div class="card-header">
+                    <i class="bi bi-toggles"></i> Behavior
+                </div>
+                <div class="card-body">
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" name="enabled" id="enabled"
+                               {% if config.enabled %}checked{% endif %}>
+                        <label class="form-check-label" for="enabled">
+                            <strong>Enable Background Processing</strong><br>
+                            <small class="text-muted">Automatically scan and queue suspicious books</small>
+                        </label>
+                    </div>
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" name="auto_fix" id="auto_fix"
+                               {% if config.auto_fix %}checked{% endif %}>
+                        <label class="form-check-label" for="auto_fix">
+                            <strong>Auto-Fix Mode</strong><br>
+                            <small class="text-muted">Automatically rename folders without approval</small>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+        <button type="submit" class="btn btn-primary btn-lg">
+            <i class="bi bi-save"></i> Save Settings
+        </button>
+    </div>
+</form>
+
+<div class="card mt-4">
+    <div class="card-header text-danger">
+        <i class="bi bi-exclamation-triangle"></i> Danger Zone
+    </div>
+    <div class="card-body">
+        <button class="btn btn-outline-danger" onclick="clearHistory()">
+            <i class="bi bi-trash"></i> Clear History
+        </button>
+        <button class="btn btn-outline-danger ms-2" onclick="resetDatabase()">
+            <i class="bi bi-arrow-counterclockwise"></i> Reset Database
+        </button>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function clearHistory() {
+    if (!confirm('Are you sure you want to clear all history? This cannot be undone.')) return;
+    // Would need API endpoint
+    alert('Not implemented yet');
+}
+
+function resetDatabase() {
+    if (!confirm('Are you sure you want to reset the entire database? All data will be lost!')) return;
+    // Would need API endpoint
+    alert('Not implemented yet');
+}
+</script>
+{% endblock %}
