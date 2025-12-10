@@ -45,9 +45,7 @@ CONFIG_PATH = BASE_DIR / 'config.json'
 SECRETS_PATH = BASE_DIR / 'secrets.json'
 
 DEFAULT_CONFIG = {
-    "library_paths": [
-        "/mnt/rag_data/audiobooks"
-    ],
+    "library_paths": [],  # Empty by default - user configures via Settings
     "openrouter_model": "google/gemma-3n-e4b-it:free",
     "scan_interval_hours": 6,
     "batch_size": 3,
@@ -55,6 +53,24 @@ DEFAULT_CONFIG = {
     "auto_fix": False,
     "enabled": True
 }
+
+DEFAULT_SECRETS = {
+    "openrouter_api_key": "",
+    "gemini_api_key": ""
+}
+
+
+def init_config():
+    """Create default config files if they don't exist."""
+    if not CONFIG_PATH.exists():
+        with open(CONFIG_PATH, 'w') as f:
+            json.dump(DEFAULT_CONFIG, f, indent=2)
+        logger.info(f"Created default config at {CONFIG_PATH}")
+
+    if not SECRETS_PATH.exists():
+        with open(SECRETS_PATH, 'w') as f:
+            json.dump(DEFAULT_SECRETS, f, indent=2)
+        logger.info(f"Created default secrets at {SECRETS_PATH}")
 
 # ============== DATABASE ==============
 
@@ -145,9 +161,19 @@ def load_config():
     return config
 
 def save_config(config):
-    """Save configuration to file."""
+    """Save configuration to file (excludes secrets)."""
+    # Separate secrets from config
+    secrets_keys = ['openrouter_api_key', 'gemini_api_key']
+    config_only = {k: v for k, v in config.items() if k not in secrets_keys}
+
     with open(CONFIG_PATH, 'w') as f:
-        json.dump(config, f, indent=2)
+        json.dump(config_only, f, indent=2)
+
+
+def save_secrets(secrets):
+    """Save API keys to secrets file."""
+    with open(SECRETS_PATH, 'w') as f:
+        json.dump(secrets, f, indent=2)
 
 # ============== AI API ==============
 
@@ -1028,10 +1054,11 @@ def history_page():
 def settings_page():
     """Settings page."""
     if request.method == 'POST':
+        # Load current config
         config = load_config()
 
+        # Update config values
         config['library_paths'] = [p.strip() for p in request.form.get('library_paths', '').split('\n') if p.strip()]
-        config['openrouter_api_key'] = request.form.get('openrouter_api_key', '')
         config['openrouter_model'] = request.form.get('openrouter_model', 'google/gemma-3n-e4b-it:free')
         config['scan_interval_hours'] = int(request.form.get('scan_interval_hours', 6))
         config['batch_size'] = int(request.form.get('batch_size', 3))
@@ -1039,7 +1066,16 @@ def settings_page():
         config['auto_fix'] = 'auto_fix' in request.form
         config['enabled'] = 'enabled' in request.form
 
+        # Save config (without secrets)
         save_config(config)
+
+        # Save secrets separately
+        secrets = {
+            'openrouter_api_key': request.form.get('openrouter_api_key', ''),
+            'gemini_api_key': request.form.get('gemini_api_key', '')
+        }
+        save_secrets(secrets)
+
         return redirect(url_for('settings_page'))
 
     config = load_config()
@@ -1164,6 +1200,7 @@ def api_stop_worker():
 # ============== MAIN ==============
 
 if __name__ == '__main__':
+    init_config()  # Create config files if they don't exist
     init_db()
     start_worker()
     app.run(host='0.0.0.0', port=5060, debug=False)

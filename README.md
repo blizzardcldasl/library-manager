@@ -64,16 +64,31 @@ cd library-manager
 pip install -r requirements.txt
 ```
 
-### 2. Configure
+### 2. Run
 
 ```bash
-# Copy example configs
+python app.py
+```
+
+Open http://localhost:5060 in your browser.
+
+### 3. Configure via Settings UI
+
+1. Click **Settings** in the navigation
+2. Add your **library paths** (one per line)
+3. Add your **OpenRouter API key** (free at [openrouter.ai](https://openrouter.ai))
+4. Click **Save Settings**
+5. Go to **Dashboard** and click **Scan Library**
+
+That's it! No need to edit config files manually - everything is configured through the web UI.
+
+### Alternative: Manual Configuration
+
+If you prefer editing files directly:
+
+```bash
 cp config.example.json config.json
 cp secrets.example.json secrets.json
-
-# Edit with your settings
-nano config.json    # Set your library path
-nano secrets.json   # Add your API key
 ```
 
 **config.json:**
@@ -94,14 +109,6 @@ nano secrets.json   # Add your API key
   "openrouter_api_key": "sk-or-v1-your-key-here"
 }
 ```
-
-### 3. Run
-
-```bash
-python app.py
-```
-
-Open http://localhost:5060 in your browser.
 
 ## AI Providers
 
