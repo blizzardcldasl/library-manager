@@ -133,6 +133,11 @@
                         </a>
                     </li>
                     <li class="nav-item">
+                        <a class="nav-link {% if request.path == '/orphans' %}active{% endif %}" href="/orphans">
+                            <i class="bi bi-file-earmark-music"></i> Orphans
+                        </a>
+                    </li>
+                    <li class="nav-item">
                         <a class="nav-link {% if request.path == '/settings' %}active{% endif %}" href="/settings">
                             <i class="bi bi-gear"></i> Settings
                         </a>

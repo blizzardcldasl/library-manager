@@ -51,75 +51,40 @@
     </div>
 </div>
 
-<div class="row mb-4">
-    <div class="col-md-6">
-        <div class="card h-100">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <span><i class="bi bi-lightning"></i> Quick Actions</span>
-            </div>
-            <div class="card-body d-flex flex-column justify-content-center">
-                <div class="d-grid gap-2">
-                    <button class="btn btn-primary" onclick="triggerScan()" id="scan-btn">
-                        <i class="bi bi-search"></i> Scan Library
-                    </button>
-                    <button class="btn btn-info" onclick="deepRescan()" id="deep-scan-btn">
-                        <i class="bi bi-arrow-repeat"></i> Deep Re-scan (Verify All)
-                    </button>
-                    <button class="btn btn-success" onclick="processQueue()" id="process-btn">
-                        <i class="bi bi-play-fill"></i> Process Queue (1 batch)
-                    </button>
-                    {% if pending_fixes > 0 %}
-                    <button class="btn btn-warning" onclick="applyAllPending()" id="apply-pending-btn">
-                        <i class="bi bi-check-all"></i> Apply {{ pending_fixes }} Pending Fixes
-                    </button>
-                    {% endif %}
-                    {% if worker_running %}
-                    <button class="btn btn-outline-danger btn-sm" onclick="stopWorker()">
-                        <i class="bi bi-stop-fill"></i> Stop Worker
-                    </button>
-                    {% else %}
-                    <button class="btn btn-outline-success btn-sm" onclick="startWorker()">
-                        <i class="bi bi-play-fill"></i> Start Worker
-                    </button>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-6">
-        <div class="card h-100">
-            <div class="card-header">
-                <i class="bi bi-bar-chart"></i> Stats (Last 7 Days)
-            </div>
-            <div class="card-body p-0" style="max-height: 250px; overflow-y: auto;">
-                {% if daily_stats %}
-                <table class="table table-sm mb-0">
-                    <thead style="position: sticky; top: 0; background: rgba(22, 33, 62, 0.95);">
-                        <tr>
-                            <th>Date</th>
-                            <th>Scanned</th>
-                            <th>Queued</th>
-                            <th>Fixed</th>
-                            <th>API</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for stat in daily_stats %}
-                        <tr>
-                            <td>{{ stat.date[5:] }}</td>
-                            <td>{{ stat.scanned or 0 }}</td>
-                            <td>{{ stat.queued or 0 }}</td>
-                            <td>{{ stat.fixed or 0 }}</td>
-                            <td>{{ stat.api_calls or 0 }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-                {% else %}
-                <p class="text-muted p-3">No stats yet. Run a scan to start tracking.</p>
-                {% endif %}
-            </div>
-        </div>
+<!-- Floating Quick Actions Button -->
+<div class="position-fixed bottom-0 end-0 m-4" style="z-index: 1050;">
+    <div class="dropup">
+        <button class="btn btn-primary btn-lg rounded-circle shadow" type="button" data-bs-toggle="dropdown" aria-expanded="false" style="width: 60px; height: 60px;">
+            <i class="bi bi-lightning-fill fs-4"></i>
+        </button>
+        <ul class="dropdown-menu dropdown-menu-end shadow mb-2" style="min-width: 200px;">
+            <li><h6 class="dropdown-header">Quick Actions</h6></li>
+            <li><a class="dropdown-item" href="#" onclick="triggerScan(); return false;" id="scan-btn">
+                <i class="bi bi-search text-primary"></i> Scan Library
+            </a></li>
+            <li><a class="dropdown-item" href="#" onclick="deepRescan(); return false;" id="deep-scan-btn">
+                <i class="bi bi-arrow-repeat text-info"></i> Deep Re-scan
+            </a></li>
+            <li><a class="dropdown-item" href="#" onclick="processQueue(); return false;" id="process-btn">
+                <i class="bi bi-play-fill text-success"></i> Process Queue
+            </a></li>
+            {% if pending_fixes > 0 %}
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item" href="#" onclick="applyAllPending(); return false;" id="apply-pending-btn">
+                <i class="bi bi-check-all text-warning"></i> Apply {{ pending_fixes }} Pending
+            </a></li>
+            {% endif %}
+            <li><hr class="dropdown-divider"></li>
+            {% if worker_running %}
+            <li><a class="dropdown-item" href="#" onclick="stopWorker(); return false;">
+                <i class="bi bi-stop-fill text-danger"></i> Stop Worker
+            </a></li>
+            {% else %}
+            <li><a class="dropdown-item" href="#" onclick="startWorker(); return false;">
+                <i class="bi bi-play-fill text-success"></i> Start Worker
+            </a></li>
+            {% endif %}
+        </ul>
     </div>
 </div>
 

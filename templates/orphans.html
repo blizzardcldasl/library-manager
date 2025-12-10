@@ -1,0 +1,282 @@
+{% extends "base.html" %}
+
+{% block title %}Orphan Files - Library Manager{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col">
+        <h2><i class="bi bi-file-earmark-music"></i> Orphan Files</h2>
+        <p class="text-muted">Audio files sitting directly in author folders without a proper book subfolder</p>
+    </div>
+    <div class="col-auto">
+        <button class="btn btn-primary" onclick="refreshOrphans()">
+            <i class="bi bi-arrow-clockwise"></i> Refresh
+        </button>
+        <button class="btn btn-success ms-2" onclick="organizeAll()" id="organize-all-btn" disabled>
+            <i class="bi bi-folder-plus"></i> Organize All
+        </button>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-exclamation-triangle text-warning"></i> Found <span id="orphan-count">0</span> orphaned file groups</span>
+        <small class="text-muted">Files are grouped by detected album/book title from metadata</small>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th style="width: 20%">Author</th>
+                        <th style="width: 30%">Detected Title</th>
+                        <th style="width: 10%">Files</th>
+                        <th style="width: 25%">File Names</th>
+                        <th style="width: 15%">Action</th>
+                    </tr>
+                </thead>
+                <tbody id="orphan-table">
+                    <tr>
+                        <td colspan="5" class="text-center py-4">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <p class="mt-2 mb-0 text-muted">Scanning for orphaned files...</p>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Title Modal -->
+<div class="modal fade" id="editModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content" style="background: #16213e; color: #eee;">
+            <div class="modal-header" style="border-color: #0f3460;">
+                <h5 class="modal-title"><i class="bi bi-pencil"></i> Edit Book Title</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label">Author</label>
+                    <input type="text" class="form-control bg-dark text-light" id="edit-author" readonly>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Book Title (folder will be created with this name)</label>
+                    <input type="text" class="form-control bg-dark text-light" id="edit-title">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Files to move</label>
+                    <div id="edit-files" class="small text-muted" style="max-height: 150px; overflow-y: auto;"></div>
+                </div>
+                <input type="hidden" id="edit-author-path">
+                <input type="hidden" id="edit-files-json">
+            </div>
+            <div class="modal-footer" style="border-color: #0f3460;">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-success" onclick="saveOrganize()">
+                    <i class="bi bi-folder-plus"></i> Create Folder & Move
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+let orphanData = [];
+
+function refreshOrphans() {
+    document.getElementById('orphan-table').innerHTML = `
+        <tr>
+            <td colspan="5" class="text-center py-4">
+                <div class="spinner-border text-primary" role="status"></div>
+                <p class="mt-2 mb-0 text-muted">Scanning for orphaned files...</p>
+            </td>
+        </tr>
+    `;
+
+    fetch('/api/orphans')
+        .then(r => r.json())
+        .then(data => {
+            orphanData = data.orphans;
+            document.getElementById('orphan-count').textContent = data.count;
+            document.getElementById('organize-all-btn').disabled = data.count === 0;
+
+            if (data.count === 0) {
+                document.getElementById('orphan-table').innerHTML = `
+                    <tr>
+                        <td colspan="5" class="text-center py-4 text-success">
+                            <i class="bi bi-check-circle fs-1"></i>
+                            <p class="mt-2 mb-0">No orphaned files found! Your library is well organized.</p>
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            let html = '';
+            data.orphans.forEach((orphan, idx) => {
+                const fileNames = orphan.files.map(f => f.split('/').pop()).join('<br>');
+                const titleClass = orphan.detected_title === 'Unknown Album' ? 'text-warning' : '';
+
+                html += `
+                    <tr>
+                        <td>
+                            <i class="bi bi-person"></i> ${escapeHtml(orphan.author)}
+                        </td>
+                        <td class="${titleClass}">
+                            <i class="bi bi-book"></i> ${escapeHtml(orphan.detected_title)}
+                            ${orphan.detected_title === 'Unknown Album' ? '<br><small class="text-warning">Could not detect from metadata</small>' : ''}
+                        </td>
+                        <td>
+                            <span class="badge bg-secondary">${orphan.file_count}</span>
+                        </td>
+                        <td>
+                            <small class="text-muted" style="max-height: 60px; overflow: hidden; display: block;">
+                                ${fileNames}
+                            </small>
+                        </td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-primary" onclick="editOrphan(${idx})">
+                                <i class="bi bi-pencil"></i> Edit
+                            </button>
+                            <button class="btn btn-sm btn-success" onclick="quickOrganize(${idx})" ${orphan.detected_title === 'Unknown Album' ? 'disabled' : ''}>
+                                <i class="bi bi-folder-plus"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            document.getElementById('orphan-table').innerHTML = html;
+        })
+        .catch(e => {
+            document.getElementById('orphan-table').innerHTML = `
+                <tr>
+                    <td colspan="5" class="text-center py-4 text-danger">
+                        <i class="bi bi-exclamation-triangle fs-1"></i>
+                        <p class="mt-2 mb-0">Error loading orphans: ${e}</p>
+                    </td>
+                </tr>
+            `;
+        });
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function editOrphan(idx) {
+    const orphan = orphanData[idx];
+    document.getElementById('edit-author').value = orphan.author;
+    document.getElementById('edit-title').value = orphan.detected_title === 'Unknown Album' ? '' : orphan.detected_title;
+    document.getElementById('edit-author-path').value = orphan.author_path;
+    document.getElementById('edit-files-json').value = JSON.stringify(orphan.files);
+
+    const filesHtml = orphan.files.map(f => `<div><i class="bi bi-file-music"></i> ${f.split('/').pop()}</div>`).join('');
+    document.getElementById('edit-files').innerHTML = filesHtml;
+
+    new bootstrap.Modal(document.getElementById('editModal')).show();
+}
+
+function saveOrganize() {
+    const authorPath = document.getElementById('edit-author-path').value;
+    const title = document.getElementById('edit-title').value.trim();
+    const files = JSON.parse(document.getElementById('edit-files-json').value);
+
+    if (!title) {
+        alert('Please enter a book title');
+        return;
+    }
+
+    fetch('/api/orphans/organize', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            author_path: authorPath,
+            book_title: title,
+            files: files
+        })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('editModal')).hide();
+            refreshOrphans();
+        } else {
+            alert('Error: ' + data.message || data.error);
+        }
+    })
+    .catch(e => alert('Error: ' + e));
+}
+
+function quickOrganize(idx) {
+    const orphan = orphanData[idx];
+    if (orphan.detected_title === 'Unknown Album') {
+        editOrphan(idx);
+        return;
+    }
+
+    if (!confirm(`Organize ${orphan.file_count} files into:\n${orphan.author}/${orphan.detected_title}?`)) {
+        return;
+    }
+
+    fetch('/api/orphans/organize', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            author_path: orphan.author_path,
+            book_title: orphan.detected_title,
+            files: orphan.files
+        })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            refreshOrphans();
+        } else {
+            alert('Error: ' + data.message || data.error);
+        }
+    })
+    .catch(e => alert('Error: ' + e));
+}
+
+function organizeAll() {
+    const unknownCount = orphanData.filter(o => o.detected_title === 'Unknown Album').length;
+    const knownCount = orphanData.length - unknownCount;
+
+    let msg = `This will organize ${knownCount} file groups into proper book folders.`;
+    if (unknownCount > 0) {
+        msg += `\n\n${unknownCount} groups with unknown titles will be skipped (edit them manually).`;
+    }
+    msg += '\n\nContinue?';
+
+    if (!confirm(msg)) return;
+
+    document.getElementById('organize-all-btn').disabled = true;
+    document.getElementById('organize-all-btn').innerHTML = '<span class="spinner-border spinner-border-sm"></span> Working...';
+
+    fetch('/api/orphans/organize_all', {method: 'POST'})
+        .then(r => r.json())
+        .then(data => {
+            alert(`Organized: ${data.organized}\nErrors: ${data.errors}\n\n${data.details.slice(0, 5).join('\n')}`);
+            refreshOrphans();
+        })
+        .catch(e => {
+            alert('Error: ' + e);
+            document.getElementById('organize-all-btn').disabled = false;
+            document.getElementById('organize-all-btn').innerHTML = '<i class="bi bi-folder-plus"></i> Organize All';
+        });
+}
+
+// Load on page load
+refreshOrphans();
+</script>
+{% endblock %}

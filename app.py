@@ -298,20 +298,27 @@ def rate_limit_wait(api_name):
         API_RATE_LIMITS[api_name]['last_call'] = time.time()
 
 
-def build_new_path(lib_path, author, title, series=None, config=None):
-    """Build a new path based on the naming format configuration."""
+def build_new_path(lib_path, author, title, series=None, narrator=None, config=None):
+    """Build a new path based on the naming format configuration.
+
+    If narrator is provided, appends it to the title folder: "Title (Narrator)"
+    This keeps different audiobook versions separate.
+    """
     naming_format = config.get('naming_format', 'author/title') if config else 'author/title'
+
+    # Include narrator in title folder if present
+    title_folder = f"{title} ({narrator})" if narrator else title
 
     if naming_format == 'author - title':
         # Flat structure: Author - Title (single folder)
-        folder_name = f"{author} - {title}"
+        folder_name = f"{author} - {title_folder}"
         return lib_path / folder_name
     elif naming_format == 'author/series/title' and series:
         # Three-level: Author/Series/Title
-        return lib_path / author / series / title
+        return lib_path / author / series / title_folder
     else:
         # Default: Author/Title (two-level)
-        return lib_path / author / title
+        return lib_path / author / title_folder
 
 
 def clean_search_title(messy_name):
@@ -771,22 +778,48 @@ API RESULTS WARNING:
 - If API author is different from input author, IGNORE THE API and keep input author
 - Only use API if input has NO author (just a title)
 
+LANGUAGE/CHARACTER RULES:
+- ALWAYS use Latin/English characters for author and title names
+- If input is "Dmitry Glukhovsky", output "Dmitry Glukhovsky" (NOT "Дмитрий Глуховский" in Cyrillic)
+- If API returns non-Latin characters (Cyrillic, Chinese, etc.), convert to the Latin equivalent
+- Keep the library consistent - English alphabet only
+
 OTHER RULES:
 - KEEP series info: "Book 2", "Book 5", "Part 1" must stay in the title
-- Remove junk: [bitsearch.to], [64k], version numbers, format tags
+- Remove junk: [bitsearch.to], [64k], version numbers, format tags, bitrates, file sizes
 - Fix obvious typos in author names (e.g., "Annie Jacobson" -> "Annie Jacobsen")
 - Clean up title formatting but keep the essence
 
+NARRATOR PRESERVATION (CRITICAL FOR AUDIOBOOKS):
+- Parentheses at the END containing a SINGLE PROPER NAME (surname) = NARRATOR
+- ONLY extract as narrator if it looks like a person's name (capitalized surname)
+- Examples that ARE narrators: "(Kafer)", "(Palmer)", "(Vance)", "(Barker)", "(Glover)", "(Fry)", "(Brick)"
+
+NOT NARRATORS - these are junk to REMOVE:
+- Genres: "(Horror)", "(Sci-Fi)", "(Fantasy)", "(Romance)", "(Thriller)", "(Mystery)"
+- Formats: "(Unabridged)", "(Abridged)", "(MP3)", "(M4B)", "(Audiobook)", "(AB)"
+- Years: "(2020)", "(1985)", any 4-digit number
+- Quality: "(64k)", "(128k)", "(HQ)", "(Complete)"
+- Sources: "(Audible)", "(Librivox)", "(BBC)"
+- Descriptors: "(Complete)", "(Full)", "(Retail)", "(SET)"
+
+HOW TO TELL THE DIFFERENCE:
+- Narrator = single capitalized word that looks like a surname (Vance, Brick, Fry)
+- NOT narrator = common English words, genres, formats, numbers
+- When in doubt, set narrator to null (don't guess)
+
 EXAMPLES:
-- "Boyett/The Hollow Man" -> Author: Steven Boyett, Title: The Hollow Man (KEEP Boyett as author!)
-- "Aron Beauregard/Yellow" -> Author: Aron Beauregard, Title: Yellow (NOT Chambers!)
-- "Brandon Sanderson - Mistborn #1 - The Final Empire" -> Author: Brandon Sanderson, Title: Mistborn: The Final Empire
-- "The Martian" (no author) -> Author: Andy Weir, Title: The Martian (OK to add author)
-- "Bastards Series/King of the" (gibberish) -> SKIP or use best guess from title only
+- "Clive Barker - 1986 - The Hellbound Heart (Kafer) 64k" -> Author: Clive Barker, Title: The Hellbound Heart, Narrator: Kafer
+- "Clive Barker - 1987 - Weaveworld (Vance) 64k 21.12.40" -> Author: Clive Barker, Title: Weaveworld, Narrator: Vance
+- "Dean Koontz - 2020 - Elsewhere (Horror)" -> Author: Dean Koontz, Title: Elsewhere, Narrator: null (Horror is a genre, NOT a narrator!)
+- "Stephen King - IT (Unabridged)" -> Author: Stephen King, Title: IT, Narrator: null (Unabridged is format, not narrator)
+- "Boyett/The Hollow Man" -> Author: Steven Boyett, Title: The Hollow Man, Narrator: null (no narrator pattern)
+- "Brandon Sanderson - Mistborn #1 - The Final Empire" -> Author: Brandon Sanderson, Title: Mistborn: The Final Empire, Narrator: null
+- "The Martian" (no author) -> Author: Andy Weir, Title: The Martian, Narrator: null
 
 Return JSON array. Each object MUST have "item" matching the ITEM_N label:
 [
-  {{"item": "ITEM_1", "author": "Author Name", "title": "Book Title", "series": null, "series_num": null, "year": null}}
+  {{"item": "ITEM_1", "author": "Author Name", "title": "Book Title", "narrator": "Narrator Name or null", "series": null, "series_num": null, "year": null}}
 ]
 
 Return ONLY the JSON array, nothing else."""
@@ -989,6 +1022,145 @@ AUTHOR_IN_TITLE_PATTERNS = [
     r'^([A-Z][a-z]+,\s+[A-Z][a-z]+)\s*-\s*',  # "LastName, FirstName - Title"
     r'\s+-\s+([A-Z][a-z]+\s+[A-Z][a-z]+)\s*$',  # "Title - Author Name"
 ]
+
+
+# ============== ORPHAN FILE HANDLING ==============
+
+def read_audio_metadata(file_path):
+    """Read ID3/metadata tags from an audio file to identify the book."""
+    try:
+        from mutagen import File
+        from mutagen.easyid3 import EasyID3
+        from mutagen.mp3 import MP3
+        from mutagen.mp4 import MP4
+
+        audio = File(file_path, easy=True)
+        if audio is None:
+            return None
+
+        metadata = {}
+
+        # Try to get album (usually the book title for audiobooks)
+        if 'album' in audio:
+            metadata['album'] = audio['album'][0] if isinstance(audio['album'], list) else audio['album']
+
+        # Try to get artist (sometimes narrator, sometimes author)
+        if 'artist' in audio:
+            metadata['artist'] = audio['artist'][0] if isinstance(audio['artist'], list) else audio['artist']
+
+        # Try to get album artist (often the author)
+        if 'albumartist' in audio:
+            metadata['albumartist'] = audio['albumartist'][0] if isinstance(audio['albumartist'], list) else audio['albumartist']
+
+        # Try to get title (track title)
+        if 'title' in audio:
+            metadata['title'] = audio['title'][0] if isinstance(audio['title'], list) else audio['title']
+
+        return metadata if metadata else None
+    except Exception as e:
+        logger.debug(f"Could not read metadata from {file_path}: {e}")
+        return None
+
+
+def find_orphan_audio_files(lib_path):
+    """Find audio files sitting directly in author folders (not in book subfolders)."""
+    orphans = []
+
+    for author_dir in Path(lib_path).iterdir():
+        if not author_dir.is_dir():
+            continue
+
+        author = author_dir.name
+
+        # Find audio files directly in author folder
+        direct_audio = [f for f in author_dir.iterdir()
+                       if f.is_file() and f.suffix.lower() in AUDIO_EXTENSIONS]
+
+        if direct_audio:
+            # Group files by potential book (using metadata or filename patterns)
+            books = {}
+
+            for audio_file in direct_audio:
+                # Try to read metadata
+                metadata = read_audio_metadata(str(audio_file))
+
+                if metadata and metadata.get('album'):
+                    book_title = metadata['album']
+                else:
+                    # Fallback: try to extract from filename
+                    # Pattern: "Book Title - Chapter 01.mp3" or "01 - Chapter Name.mp3"
+                    fname = audio_file.stem
+                    # Remove chapter/track numbers
+                    book_title = re.sub(r'^\d+[\s\-\.]+', '', fname)
+                    book_title = re.sub(r'[\s\-]+\d+$', '', book_title)
+                    book_title = re.sub(r'\s*-\s*(chapter|part|track|disc)\s*\d*.*$', '', book_title, flags=re.IGNORECASE)
+
+                    if not book_title or book_title == fname:
+                        book_title = "Unknown Album"
+
+                if book_title not in books:
+                    books[book_title] = []
+                books[book_title].append(audio_file)
+
+            for book_title, files in books.items():
+                orphans.append({
+                    'author': author,
+                    'author_path': str(author_dir),
+                    'detected_title': book_title,
+                    'files': [str(f) for f in files],
+                    'file_count': len(files)
+                })
+
+    return orphans
+
+
+def organize_orphan_files(author_path, book_title, files, config=None):
+    """Create a book folder and move orphan files into it."""
+    import shutil
+
+    author_dir = Path(author_path)
+
+    # Clean up the book title for folder name
+    clean_title = book_title
+
+    # Remove format/quality junk from title
+    clean_title = re.sub(r'\s*\((?:Unabridged|Abridged|MP3|M4B|64k|128k|HQ|Complete|Full|Retail)\)', '', clean_title, flags=re.IGNORECASE)
+    clean_title = re.sub(r'\s*\[.*?\]', '', clean_title)  # Remove bracketed content
+    clean_title = re.sub(r'[<>:"/\\|?*]', '', clean_title)  # Remove illegal chars
+    clean_title = clean_title.strip()
+
+    if not clean_title:
+        return False, "Could not determine book title"
+
+    book_dir = author_dir / clean_title
+
+    # Check if folder already exists
+    if book_dir.exists():
+        # Check if it's empty or has files
+        existing = list(book_dir.iterdir())
+        if existing:
+            return False, f"Folder already exists with {len(existing)} items: {book_dir}"
+    else:
+        book_dir.mkdir(parents=True)
+
+    # Move files
+    moved = 0
+    errors = []
+    for file_path in files:
+        try:
+            src = Path(file_path)
+            if src.exists():
+                dest = book_dir / src.name
+                shutil.move(str(src), str(dest))
+                moved += 1
+        except Exception as e:
+            errors.append(f"{file_path}: {e}")
+
+    if errors:
+        return False, f"Moved {moved} files, {len(errors)} errors: {errors[0]}"
+
+    logger.info(f"Organized {moved} orphan files into: {book_dir}")
+    return True, f"Created {book_dir.name} with {moved} files"
 
 
 def is_disc_chapter_folder(name):
@@ -1378,6 +1550,7 @@ def process_queue(config, limit=None):
     for row, result in zip(batch, results):
         new_author = (result.get('author') or '').strip()
         new_title = (result.get('title') or '').strip()
+        new_narrator = (result.get('narrator') or '').strip() or None  # None if empty
 
         if not new_author or not new_title:
             # Remove from queue, mark as verified
@@ -1387,11 +1560,11 @@ def process_queue(config, limit=None):
             logger.info(f"Verified OK (empty result): {row['current_author']}/{row['current_title']}")
             continue
 
-        # Check if fix needed
-        if new_author != row['current_author'] or new_title != row['current_title']:
+        # Check if fix needed (also check narrator change)
+        if new_author != row['current_author'] or new_title != row['current_title'] or new_narrator:
             old_path = Path(row['path'])
             lib_path = old_path.parent.parent
-            new_path = build_new_path(lib_path, new_author, new_title, config=config)
+            new_path = build_new_path(lib_path, new_author, new_title, narrator=new_narrator, config=config)
 
             # Check for drastic author change
             drastic_change = is_drastic_author_change(row['current_author'], new_author)
@@ -1445,30 +1618,60 @@ def process_queue(config, limit=None):
                     processed += 1
                     continue
 
-                # Recalculate new_path with potentially updated author/title
-                new_path = build_new_path(lib_path, new_author, new_title, config=config)
+                # Recalculate new_path with potentially updated author/title/narrator
+                new_path = build_new_path(lib_path, new_author, new_title, narrator=new_narrator, config=config)
 
             # Only auto-fix if enabled AND NOT a drastic change
             # Drastic changes ALWAYS require manual approval to prevent data loss
             if config.get('auto_fix', False) and not drastic_change:
                 # Actually rename the folder
                 try:
+                    import shutil
+
                     if new_path.exists():
-                        # Merge into existing
-                        for item in old_path.iterdir():
-                            dest = new_path / item.name
-                            if not dest.exists():
-                                item.rename(dest)
-                        old_path.rmdir()
-                        if not any(old_path.parent.iterdir()):
-                            old_path.parent.rmdir()
+                        # Destination already exists - check if it has files
+                        existing_files = list(new_path.iterdir())
+                        if existing_files:
+                            # DON'T MERGE - this is likely a different narrator version
+                            # Mark as conflict and skip
+                            logger.warning(f"CONFLICT: {new_path} already exists with files - skipping to preserve different versions")
+                            c.execute('''INSERT INTO history (book_id, old_author, old_title, new_author, new_title, old_path, new_path, status, error_message)
+                                         VALUES (?, ?, ?, ?, ?, ?, ?, 'error', 'Destination exists - possible different narrator version')''',
+                                     (row['book_id'], row['current_author'], row['current_title'],
+                                      new_author, new_title, str(old_path), str(new_path)))
+                            c.execute('UPDATE books SET status = ?, error_message = ? WHERE id = ?',
+                                     ('conflict', 'Destination folder exists with files', row['book_id']))
+                            c.execute('DELETE FROM queue WHERE id = ?', (row['queue_id'],))
+                            processed += 1
+                            continue
+                        else:
+                            # Destination is empty folder - safe to use it
+                            shutil.move(str(old_path), str(new_path.parent / (new_path.name + "_temp")))
+                            new_path.rmdir()
+                            (new_path.parent / (new_path.name + "_temp")).rename(new_path)
+
+                        # Clean up empty parent author folder
+                        try:
+                            if old_path.parent.exists() and not any(old_path.parent.iterdir()):
+                                old_path.parent.rmdir()
+                        except OSError:
+                            pass  # Parent not empty, that's fine
                     else:
+                        # Destination doesn't exist - simple rename
                         new_path.parent.mkdir(parents=True, exist_ok=True)
-                        old_path.rename(new_path)
-                        if not any(old_path.parent.iterdir()):
-                            old_path.parent.rmdir()
+                        shutil.move(str(old_path), str(new_path))
+
+                        # Clean up empty parent author folder
+                        try:
+                            if old_path.parent.exists() and not any(old_path.parent.iterdir()):
+                                old_path.parent.rmdir()
+                        except OSError:
+                            pass  # Parent not empty, that's fine
 
                     logger.info(f"Fixed: {row['current_author']}/{row['current_title']} -> {new_author}/{new_title}")
+
+                    # Clean up any stale pending entries for this book before recording fix
+                    c.execute("DELETE FROM history WHERE book_id = ? AND status = 'pending_fix'", (row['book_id'],))
 
                     # Record in history
                     c.execute('''INSERT INTO history (book_id, old_author, old_title, new_author, new_title, old_path, new_path, status)
@@ -1476,10 +1679,15 @@ def process_queue(config, limit=None):
                              (row['book_id'], row['current_author'], row['current_title'],
                               new_author, new_title, str(old_path), str(new_path)))
 
-                    # Update book record
-                    c.execute('''UPDATE books SET path = ?, current_author = ?, current_title = ?, status = ?
-                                 WHERE id = ?''',
-                             (str(new_path), new_author, new_title, 'fixed', row['book_id']))
+                    # Update book record - handle case where another book already has this path
+                    try:
+                        c.execute('''UPDATE books SET path = ?, current_author = ?, current_title = ?, status = ?
+                                     WHERE id = ?''',
+                                 (str(new_path), new_author, new_title, 'fixed', row['book_id']))
+                    except sqlite3.IntegrityError:
+                        # Path already exists (duplicate book merged) - delete this book record
+                        logger.info(f"Merged duplicate: {row['path']} -> existing {new_path}")
+                        c.execute('DELETE FROM books WHERE id = ?', (row['book_id'],))
 
                     fixed += 1
                 except Exception as e:
@@ -1488,9 +1696,10 @@ def process_queue(config, limit=None):
                     c.execute('UPDATE books SET status = ?, error_message = ? WHERE id = ?',
                              ('error', error_msg, row['book_id']))
             else:
-                # Just record the suggested fix
-                c.execute('''INSERT INTO history (book_id, old_author, old_title, new_author, new_title, old_path, new_path)
-                             VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                # Drastic change or auto_fix disabled - record as pending for manual review
+                logger.info(f"PENDING APPROVAL: {row['current_author']} -> {new_author} (drastic={drastic_change})")
+                c.execute('''INSERT INTO history (book_id, old_author, old_title, new_author, new_title, old_path, new_path, status)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, 'pending_fix')''',
                          (row['book_id'], row['current_author'], row['current_title'],
                           new_author, new_title, str(old_path), str(new_path)))
                 c.execute('UPDATE books SET status = ? WHERE id = ?', ('pending_fix', row['book_id']))
@@ -1538,20 +1747,35 @@ def apply_fix(history_id):
         return False, error_msg
 
     try:
+        import shutil
+
         if new_path.exists():
-            # Merge
-            for item in old_path.iterdir():
-                dest = new_path / item.name
-                if not dest.exists():
-                    item.rename(dest)
-            old_path.rmdir()
-            if old_path.parent.exists() and not any(old_path.parent.iterdir()):
-                old_path.parent.rmdir()
+            # Destination already exists - check if it has files
+            existing_files = list(new_path.iterdir())
+            if existing_files:
+                # DON'T MERGE - this is likely a different narrator version
+                error_msg = "Destination folder already exists with files - possible different narrator version"
+                c.execute('UPDATE history SET status = ?, error_message = ? WHERE id = ?',
+                         ('error', error_msg, history_id))
+                conn.commit()
+                conn.close()
+                return False, error_msg
+            else:
+                # Destination is empty folder - safe to use it
+                shutil.move(str(old_path), str(new_path.parent / (new_path.name + "_temp")))
+                new_path.rmdir()
+                (new_path.parent / (new_path.name + "_temp")).rename(new_path)
         else:
+            # Simple rename
             new_path.parent.mkdir(parents=True, exist_ok=True)
-            old_path.rename(new_path)
+            shutil.move(str(old_path), str(new_path))
+
+        # Clean up empty parent
+        try:
             if old_path.parent.exists() and not any(old_path.parent.iterdir()):
                 old_path.parent.rmdir()
+        except OSError:
+            pass
 
         # Update book record
         c.execute('''UPDATE books SET path = ?, current_author = ?, current_title = ?, status = ?
@@ -1768,6 +1992,11 @@ def dashboard():
                           daily_stats=daily_stats,
                           config=config,
                           worker_running=worker_running)
+
+@app.route('/orphans')
+def orphans_page():
+    """Orphan files management page."""
+    return render_template('orphans.html')
 
 @app.route('/queue')
 def queue_page():
@@ -2283,6 +2512,79 @@ def api_recent_history():
     items = [dict(row) for row in c.fetchall()]
     conn.close()
     return jsonify({'items': items})
+
+
+@app.route('/api/orphans')
+def api_orphans():
+    """Find orphan audio files (files sitting directly in author folders)."""
+    config = load_config()
+    orphans = []
+
+    for lib_path in config.get('library_paths', []):
+        lib_orphans = find_orphan_audio_files(lib_path)
+        orphans.extend(lib_orphans)
+
+    return jsonify({
+        'count': len(orphans),
+        'orphans': orphans
+    })
+
+
+@app.route('/api/orphans/organize', methods=['POST'])
+def api_organize_orphan():
+    """Organize orphan files into a proper book folder."""
+    data = request.json
+    author_path = data.get('author_path')
+    book_title = data.get('book_title')
+    files = data.get('files', [])
+
+    if not author_path or not book_title or not files:
+        return jsonify({'success': False, 'error': 'Missing required fields'})
+
+    config = load_config()
+    success, message = organize_orphan_files(author_path, book_title, files, config)
+
+    return jsonify({
+        'success': success,
+        'message': message
+    })
+
+
+@app.route('/api/orphans/organize_all', methods=['POST'])
+def api_organize_all_orphans():
+    """Auto-organize all detected orphan files using metadata."""
+    config = load_config()
+    results = {'organized': 0, 'errors': 0, 'details': []}
+
+    for lib_path in config.get('library_paths', []):
+        orphans = find_orphan_audio_files(lib_path)
+
+        for orphan in orphans:
+            if orphan['detected_title'] == 'Unknown Album':
+                results['errors'] += 1
+                results['details'].append(f"Skipped {orphan['author']}: unknown title")
+                continue
+
+            success, message = organize_orphan_files(
+                orphan['author_path'],
+                orphan['detected_title'],
+                orphan['files'],
+                config
+            )
+
+            if success:
+                results['organized'] += 1
+                results['details'].append(f"Organized: {orphan['author']}/{orphan['detected_title']}")
+            else:
+                results['errors'] += 1
+                results['details'].append(f"Error: {orphan['author']}: {message}")
+
+    return jsonify({
+        'success': True,
+        'organized': results['organized'],
+        'errors': results['errors'],
+        'details': results['details'][:20]  # Limit details
+    })
 
 
 @app.route('/api/version')

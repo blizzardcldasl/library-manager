@@ -123,6 +123,21 @@ Beautiful dark-themed UI showing:
 - **Apply** (✓) or **Reject** (✗) each suggestion
 - Bulk apply all pending fixes
 
+### Orphan File Detection
+Find and organize loose audio files sitting directly in author folders:
+- **Automatic detection** - Reads ID3 metadata (album tag) to identify books
+- **Visual management** - See all orphans with detected titles
+- **One-click organize** - Creates proper book folders and moves files
+- **Edit before organizing** - Change detected title if needed
+- **Batch organize** - Process all orphans at once
+
+### Smart Narrator Preservation
+Keeps different audiobook versions separate:
+- Detects narrator names from folder patterns like `(Kafer)`, `(Vance)`
+- Creates separate folders: `The Hellbound Heart (Kafer)`, `The Hellbound Heart (Barker)`
+- **Won't merge different versions** - Protects your narrator-specific copies
+- Distinguishes narrators from junk: `(Horror)` = genre (stripped), `(Kafer)` = narrator (kept)
+
 ### Customizable Naming Formats
 
 Choose the folder structure that matches your player:
