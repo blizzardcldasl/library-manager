@@ -11,13 +11,14 @@ Features:
 - Multi-provider AI (Gemini, OpenRouter, Ollama)
 """
 
-APP_VERSION = "0.9.0-beta.3"
+APP_VERSION = "0.9.0-beta.4"
 GITHUB_REPO = "deucebucket/library-manager"  # Your GitHub repo
 
 # Versioning Guide:
 # 0.9.0-beta.1  = Initial beta (basic features)
 # 0.9.0-beta.2  = Garbage filtering, series grouping, dismiss errors
-# 0.9.0-beta.3  = Current (UI cleanup - merged Advanced/Tools tabs)
+# 0.9.0-beta.3  = UI cleanup - merged Advanced/Tools tabs
+# 0.9.0-beta.4  = Current (improved series detection, DB locking fix, system folder filtering)
 # 0.9.0-rc.1    = Release candidate (feature complete, final testing)
 # 1.0.0         = First stable release (everything works!)
 
@@ -96,6 +97,26 @@ def extract_series_from_title(title):
     match = re.search(r'^(.+?)\s+Book\s+(\d+)\s*[:\s-]+(.+)$', normalized, re.IGNORECASE)
     if match:
         return match.group(1).strip(), int(match.group(2)), match.group(3).strip()
+
+    # Pattern: "Series Book N" at END (no subtitle) - e.g., "Dark One Book 1"
+    # Series name = title before "Book N", actual title = same as series
+    match = re.search(r'^(.+?)\s+Book\s+(\d+)\s*$', normalized, re.IGNORECASE)
+    if match:
+        series = match.group(1).strip()
+        return series, int(match.group(2)), series  # Title = series name
+
+    # Pattern: "Series #N" at END (no subtitle) - e.g., "Mistborn #1"
+    match = re.search(r'^(.+?)\s*#(\d+)\s*$', normalized)
+    if match:
+        series = match.group(1).strip()
+        return series, int(match.group(2)), series
+
+    # Pattern: "Title (Book N)" - book number in parentheses at end
+    # e.g., "Ivypool's Heart (Book 17)" -> extract number, title stays same
+    match = re.search(r'^(.+?)\s*\(Book\s+(\d+)\)\s*$', normalized, re.IGNORECASE)
+    if match:
+        title_clean = match.group(1).strip()
+        return None, int(match.group(2)), title_clean  # Series unknown, just got number
 
     return None, None, title
 
@@ -329,9 +350,10 @@ def init_db():
     conn.close()
 
 def get_db():
-    """Get database connection."""
-    conn = sqlite3.connect(DB_PATH)
+    """Get database connection with timeout to avoid lock issues."""
+    conn = sqlite3.connect(DB_PATH, timeout=30)  # Wait up to 30 seconds for lock
     conn.row_factory = sqlite3.Row
+    conn.execute('PRAGMA journal_mode=WAL')  # Better concurrent access
     return conn
 
 # ============== CONFIG ==============
@@ -390,6 +412,13 @@ def is_drastic_author_change(old_author, new_author):
     # Normalize for comparison
     old_norm = old_author.lower().strip()
     new_norm = new_author.lower().strip()
+
+    # Placeholder authors - going FROM these to a real author is NOT drastic
+    placeholder_authors = {'unknown', 'various', 'various authors', 'va', 'n/a', 'none',
+                           'audiobook', 'audiobooks', 'ebook', 'ebooks', 'book', 'books',
+                           'author', 'authors', 'narrator', 'untitled', 'no author'}
+    if old_norm in placeholder_authors:
+        return False  # Finding the real author is always good
 
     # If they're the same after normalization, not drastic
     if old_norm == new_norm:
@@ -1046,10 +1075,11 @@ LANGUAGE/CHARACTER RULES:
 - Keep the library consistent - English alphabet only
 
 OTHER RULES:
-- KEEP series info: "Book 2", "Book 5", "Part 1" must stay in the title
+- NEVER put "Book 1", "Book 2", etc. in the title field - that goes in series_num
+- The title should be the ACTUAL book title, not "Series Name Book N"
 - Remove junk: [bitsearch.to], [64k], version numbers, format tags, bitrates, file sizes
 - Fix obvious typos in author names (e.g., "Annie Jacobson" -> "Annie Jacobsen")
-- Clean up title formatting but keep the essence
+- Clean up title formatting but PRESERVE the actual title - don't replace it
 
 NARRATOR PRESERVATION (CRITICAL FOR AUDIOBOOKS):
 - Parentheses at the END containing a SINGLE PROPER NAME (surname) = NARRATOR
@@ -1071,16 +1101,20 @@ HOW TO TELL THE DIFFERENCE:
 
 SERIES DETECTION:
 - If the book is part of a known series, set "series" to the series name and "series_num" to the book number
+- The "title" field should be the ACTUAL BOOK TITLE - never "Series Book N"
 - Examples of series books:
-  - "Mistborn Book 1" -> series: "Mistborn", series_num: 1, title: "The Final Empire"
+  - "Mistborn Book 1" -> series: "Mistborn", series_num: 1, title: "The Final Empire" (NOT "Mistborn Book 1")
+  - "Dark One: The Forgotten" -> series: "Dark One", series_num: 2, title: "The Forgotten" (keep actual subtitle!)
+  - "The Reckoners Book 2 - Firefight" -> series: "The Reckoners", series_num: 2, title: "Firefight"
   - "Eragon" -> series: "Inheritance Cycle", series_num: 1, title: "Eragon"
-  - "The Eye of the World" -> series: "The Wheel of Time", series_num: 1
-  - "Leviathan Wakes" -> series: "The Expanse", series_num: 1
+  - "The Eye of the World" -> series: "The Wheel of Time", series_num: 1, title: "The Eye of the World"
+  - "Leviathan Wakes" -> series: "The Expanse", series_num: 1, title: "Leviathan Wakes"
 - Standalone books (NOT in a series) -> series: null, series_num: null
   - "The Martian" by Andy Weir = standalone, no series
   - "Project Hail Mary" by Andy Weir = standalone, no series
   - "Warbreaker" by Brandon Sanderson = standalone, no series
 - Only set series if you're CERTAIN it's part of a series. When in doubt, leave null.
+- CRITICAL: Never replace the actual title with "Book N" - preserve what makes each book unique!
 
 EXAMPLES:
 - "Clive Barker - 1986 - The Hellbound Heart (Kafer) 64k" -> Author: Clive Barker, Title: The Hellbound Heart, Narrator: Kafer, series: null
@@ -1465,6 +1499,17 @@ def clean_title(title):
 def analyze_author(author):
     """Analyze author name for issues, return list of issues."""
     issues = []
+
+    # System/junk folder names - these should NEVER be processed as books
+    system_folders = {'metadata', 'tmp', 'temp', 'cache', 'config', 'data', 'logs', 'log',
+                      'backup', 'backups', 'old', 'new', 'test', 'tests', 'sample', 'samples',
+                      '.thumbnails', 'thumbnails', 'covers', 'images', 'artwork', 'art',
+                      'extras', 'bonus', 'misc', 'other', 'various', 'unknown', 'unsorted',
+                      'downloads', 'incoming', 'processing', 'completed', 'done', 'failed',
+                      'streams', 'chapters', 'parts', 'disc', 'disk', 'cd', 'dvd'}
+    if author.lower() in system_folders:
+        issues.append("system_folder_not_author")
+        return issues  # Don't bother checking anything else
 
     # Year in author name
     if re.search(r'\b(19[0-9]{2}|20[0-2][0-9])\b', author):
@@ -1886,15 +1931,38 @@ def process_queue(config, limit=None):
         new_series_num = result.get('series_num')  # Series number (can be int or string like "1" or "Book 1")
         new_year = result.get('year')  # Publication year
 
-        # If AI didn't detect series, try to extract it from the title pattern
-        # This catches titles like "The Firefly Series, Book 8: Coup de Grâce"
-        if not new_series and new_title:
-            extracted_series, extracted_num, extracted_title = extract_series_from_title(new_title)
+        # If AI didn't detect series, try to extract it from title patterns
+        # First try the ORIGINAL title (has series info like "The Reckoners, Book 2 - Firefight")
+        # Then try the new title as fallback
+        if not new_series:
+            # Try original title first (most likely to have series pattern)
+            original_title = row['current_title']
+            extracted_series, extracted_num, extracted_title = extract_series_from_title(original_title)
             if extracted_series:
                 new_series = extracted_series
                 new_series_num = extracted_num
-                new_title = extracted_title  # Use the cleaned title without series prefix
-                logger.info(f"Extracted series from title: '{extracted_series}' #{extracted_num} - '{extracted_title}'")
+                # Keep the AI's cleaned title, just add the series info
+                logger.info(f"Extracted series from original title: '{extracted_series}' #{extracted_num}")
+            else:
+                # Got book number but no series name? Check if original "author" is actually a series
+                if extracted_num and not new_series:
+                    original_author = row['current_author']
+                    # Check if original author looks like a series name
+                    series_indicators = ['series', 'saga', 'cycle', 'chronicles', 'trilogy', 'collection',
+                                         'edition', 'novels', 'books', 'tales', 'adventures', 'mysteries']
+                    if any(ind in original_author.lower() for ind in series_indicators):
+                        new_series = original_author
+                        new_series_num = extracted_num
+                        logger.info(f"Using original author as series: '{new_series}' #{new_series_num}")
+
+            # Fallback: try the new title
+            if not new_series and new_title:
+                extracted_series, extracted_num, extracted_title = extract_series_from_title(new_title)
+                if extracted_series:
+                    new_series = extracted_series
+                    new_series_num = extracted_num
+                    new_title = extracted_title
+                    logger.info(f"Extracted series from new title: '{extracted_series}' #{extracted_num} - '{extracted_title}'")
 
         if not new_author or not new_title:
             # Remove from queue, mark as verified

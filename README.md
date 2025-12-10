@@ -173,10 +173,14 @@ Enable series grouping to organize books in a format compatible with Audiobooksh
 
 Series detection works from:
 - **API metadata** - Google Books, Audnexus, etc. provide series info
+- **Original folder names** - Extracts series from messy folder names
 - **Title patterns** - Automatically parses titles like:
   - `The Firefly Series, Book 8: Coup de Grâce` → Series: Firefly, #8
   - `Mistborn Book 1: The Final Empire` → Series: Mistborn, #1
   - `The Expanse #3 - Abaddon's Gate` → Series: The Expanse, #3
+  - `Ivypool's Heart (Book 17)` → Extracts book #17
+  - `Would you Love a Monster Girl, Book 5 - Rose` → Series detected, #5
+- **Series-like author folders** - If author folder contains "Series", "Saga", "Edition", etc., it becomes the series name (e.g., `Warriors Super Edition/Book Title (Book 3)`)
 
 Standalone books (not part of a series) remain in `Author/Title` format.
 

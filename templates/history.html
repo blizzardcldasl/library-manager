@@ -22,31 +22,37 @@
 </div>
 
 {% if history_items %}
+<style>
+    .resizable-table th { resize: horizontal; overflow: auto; min-width: 60px; }
+    .resizable-table td { word-break: break-word; }
+</style>
 <div class="card">
-    <div class="card-body p-0" style="max-height: 600px; overflow-y: auto;">
-        <table class="table table-sm mb-0">
-            <thead style="position: sticky; top: 0; background: rgba(22, 33, 62, 0.95); z-index: 10;">
+    <div class="card-body p-0" style="max-height: 700px; overflow: auto;">
+        <table class="table table-sm mb-0 resizable-table" style="table-layout: auto;">
+            <thead style="position: sticky; top: 0; background: rgba(22, 33, 62, 0.98); z-index: 10;">
                 <tr>
-                    <th>Date</th>
-                    <th>Original</th>
-                    <th></th>
-                    <th>Corrected</th>
-                    <th>Status</th>
-                    <th>Action</th>
+                    <th style="width: 90px;">Date</th>
+                    <th style="width: 25%;">Original</th>
+                    <th style="width: 30px;"></th>
+                    <th style="width: 35%;">Corrected Path</th>
+                    <th style="width: 80px;">Status</th>
+                    <th style="width: 80px;">Action</th>
                 </tr>
             </thead>
             <tbody>
                 {% for h in history_items %}
                 <tr>
                     <td><small>{{ h.fixed_at[5:16] }}</small></td>
-                    <td class="text-truncate" style="max-width: 180px;">
+                    <td title="{{ h.old_path }}">
                         <strong class="text-danger">{{ h.old_author }}</strong><br>
                         <small class="text-muted">{{ h.old_title }}</small>
                     </td>
                     <td><i class="bi bi-arrow-right text-info"></i></td>
-                    <td class="text-truncate" style="max-width: 180px;">
+                    <td title="{{ h.new_path }}">
+                        {% set path_parts = h.new_path.split('/') %}
+                        {% set rel_path = '/'.join(path_parts[-3:]) if path_parts|length >= 6 else '/'.join(path_parts[-2:]) %}
                         <strong class="text-success">{{ h.new_author }}</strong><br>
-                        <small class="text-info">{{ h.new_title }}</small>
+                        <small class="text-info">{{ rel_path }}</small>
                     </td>
                     <td>
                         {% if h.is_drastic %}
