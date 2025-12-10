@@ -208,22 +208,29 @@ def build_prompt(messy_names):
         items.append(f"ITEM_{i+1}: {name}")
     names_list = "\n".join(items)
 
-    return f"""Parse these book filenames. Extract author and title.
+    return f"""You are a book metadata expert. For each filename, identify the REAL author and title.
 
 {names_list}
 
-RULES:
-- Author names are people (e.g. "Adrian Tchaikovsky", "Dean Koontz", "Cormac McCarthy")
-- Titles are book names (e.g. "Service Model", "The Funhouse", "Stella Maris")
-- IMPORTANT: Keep series info in the title! "Book 2", "Book 6", "Part 1" etc MUST stay in the title
-  - "Trailer Park Elves, Book 2" -> title should be "Trailer Park Elves, Book 2" NOT just "Trailer Park Elves"
-  - "The Expanse 3" -> title should include the "3"
-- Remove junk: [bitsearch.to], version numbers [r1.1], quality [64k], format suffixes (EPUB, MP3)
-- "Author - Title" format: first part is usually author
-- "Title by Author" format: author comes after "by"
-- Years like 1999 go in year field, not author
-- For "LastName, FirstName" format, author is "FirstName LastName"
-- Keep ALL co-authors (e.g. "Michael Dalton, Adam Lance" stays as-is)
+YOUR JOB:
+1. USE YOUR KNOWLEDGE of real books and authors to identify correct metadata
+2. If you recognize the book title, provide the CORRECT author even if the filename is wrong
+3. If you only see a title with no author, LOOK UP who actually wrote that book
+4. Verify authors are REAL people who write books, not random words from the filename
+
+CRITICAL RULES:
+- Authors are REAL people (e.g. "Brandon Sanderson", "Stephen King", "Cebelius")
+- If the filename already has "Author / Title" format and looks correct, KEEP IT
+- Do NOT swap author and title - if "Cebelius / Book Title" the author is Cebelius
+- Random words like "Rose", "Blue", single words are usually NOT authors unless they're actually famous authors
+- KEEP series info: "Book 2", "Book 5", "Part 1" must stay in the title
+- Remove junk: [bitsearch.to], [64k], version numbers, format tags
+
+EXAMPLES:
+- "Cebelius / Would you Love a Monster Girl, Book 5 - Rose" -> Author: Cebelius, Title: Would you Love a Monster Girl, Book 5 (Rose is subtitle, not author!)
+- "The Martian" -> Author: Andy Weir, Title: The Martian (you know who wrote this!)
+- "Brandon Sanderson - Mistborn" -> Author: Brandon Sanderson, Title: Mistborn
+- "Project Hail Mary [64k]" -> Author: Andy Weir, Title: Project Hail Mary
 
 Return JSON array. Each object MUST have "item" matching the ITEM_N label:
 [
