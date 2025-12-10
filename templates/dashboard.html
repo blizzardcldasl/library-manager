@@ -59,6 +59,11 @@
                     <button class="btn btn-success" onclick="processQueue()" id="process-btn">
                         <i class="bi bi-play-fill"></i> Process Queue (1 batch)
                     </button>
+                    {% if pending_fixes > 0 %}
+                    <button class="btn btn-warning" onclick="applyAllPending()" id="apply-pending-btn">
+                        <i class="bi bi-check-all"></i> Apply {{ pending_fixes }} Pending Fixes
+                    </button>
+                    {% endif %}
                     {% if worker_running %}
                     <button class="btn btn-outline-danger btn-sm" onclick="stopWorker()">
                         <i class="bi bi-stop-fill"></i> Stop Worker
@@ -256,6 +261,25 @@ function stopWorker() {
     fetch('/api/worker/stop', {method: 'POST'})
         .then(r => r.json())
         .then(() => location.reload());
+}
+
+function applyAllPending() {
+    if (!confirm('Apply all pending fixes? This will rename folders in your library.')) return;
+
+    const btn = document.getElementById('apply-pending-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Applying...';
+
+    fetch('/api/apply_all_pending', {method: 'POST'})
+        .then(r => r.json())
+        .then(data => {
+            alert(data.message);
+            location.reload();
+        })
+        .catch(e => {
+            btn.disabled = false;
+            alert('Error: ' + e);
+        });
 }
 
 // Auto-refresh stats and recent activity

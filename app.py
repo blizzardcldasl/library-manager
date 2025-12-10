@@ -1257,6 +1257,31 @@ def api_apply_fix(history_id):
     success, message = apply_fix(history_id)
     return jsonify({'success': success, 'message': message})
 
+@app.route('/api/apply_all_pending', methods=['POST'])
+def api_apply_all_pending():
+    """Apply all pending fixes."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT id FROM history WHERE status = 'pending_fix'")
+    pending = c.fetchall()
+    conn.close()
+
+    applied = 0
+    errors = 0
+    for row in pending:
+        success, _ = apply_fix(row['id'])
+        if success:
+            applied += 1
+        else:
+            errors += 1
+
+    return jsonify({
+        'success': True,
+        'applied': applied,
+        'errors': errors,
+        'message': f'Applied {applied} fixes, {errors} errors'
+    })
+
 @app.route('/api/remove_from_queue/<int:queue_id>', methods=['POST'])
 def api_remove_from_queue(queue_id):
     """Remove an item from the queue."""
