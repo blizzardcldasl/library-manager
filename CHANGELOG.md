@@ -2,6 +2,16 @@
 
 All notable changes to Library Manager will be documented in this file.
 
+## [0.9.0-beta.11] - 2025-12-10
+
+### Added
+- **Automated issue handling** - Scripts to auto-process GitHub issues
+  - `scripts/auto-fix-issues.sh` - Monitors and processes issues with Claude
+  - `scripts/issue-bot-prompt.md` - Guidelines for how Claude should respond
+  - Supports cron scheduling for automatic monitoring
+  - Claude will fix issues it understands, ask for clarification if unsure
+  - Responses written in casual developer tone, not AI-speak
+
 ## [0.9.0-beta.10] - 2025-12-10
 
 ### Added
