@@ -228,44 +228,207 @@ def call_ai(messy_names, config):
 
     return None
 
-# ============== SCANNER ==============
+# ============== DEEP SCANNER ==============
 
-def looks_suspicious(author, title):
-    """Check if author/title look potentially wrong."""
+import re
+import hashlib
+
+# Audio file extensions we care about
+AUDIO_EXTENSIONS = {'.m4b', '.mp3', '.m4a', '.flac', '.ogg', '.opus', '.wma', '.aac'}
+EBOOK_EXTENSIONS = {'.epub', '.pdf', '.mobi', '.azw3'}
+
+# Patterns for disc/chapter folders (these are NOT book titles)
+DISC_CHAPTER_PATTERNS = [
+    r'^(disc|disk|cd|part|chapter|ch)\s*\d+',  # "Disc 1", "Part 2", "Chapter 3"
+    r'^\d+\s*[-_]\s*(disc|disk|cd|part|chapter)',  # "1 - Disc", "01_Chapter"
+    r'^(side)\s*[ab12]',  # "Side A", "Side 1"
+    r'.+\s*-\s*(disc|disk|cd)\s*\d+$',  # "Book Name - Disc 01"
+]
+
+# Junk patterns to clean from titles
+JUNK_PATTERNS = [
+    r'\[bitsearch\.to\]',
+    r'\[rarbg\]',
+    r'\(unabridged\)',
+    r'\(abridged\)',
+    r'\(audiobook\)',
+    r'\(audio\)',
+    r'\(graphicaudio\)',
+    r'\(uk version\)',
+    r'\(us version\)',
+    r'\[EN\]',
+    r'\(r\d+\.\d+\)',  # (r1.0), (r1.1)
+    r'\[\d+\]',  # [64420]
+    r'\{\d+mb\}',  # {388mb}
+    r'\{\d+\.\d+gb\}',  # {1.29gb}
+    r'\d+k\s+\d+\.\d+\.\d+',  # 64k 13.31.36
+    r'128k|64k|192k|320k',  # bitrate
+    r'\.epub$|\.pdf$|\.mobi$',  # file extensions in folder names
+]
+
+# Patterns that indicate author name in title
+AUTHOR_IN_TITLE_PATTERNS = [
+    r'\s+by\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\s*$',  # "Title by Author Name"
+    r'^([A-Z][a-z]+,\s+[A-Z][a-z]+)\s*-\s*',  # "LastName, FirstName - Title"
+    r'\s+-\s+([A-Z][a-z]+\s+[A-Z][a-z]+)\s*$',  # "Title - Author Name"
+]
+
+
+def is_disc_chapter_folder(name):
+    """Check if folder name looks like a disc/chapter subfolder."""
+    name_lower = name.lower()
+    for pattern in DISC_CHAPTER_PATTERNS:
+        if re.search(pattern, name_lower, re.IGNORECASE):
+            return True
+    return False
+
+
+def clean_title(title):
+    """Remove junk from title, return (cleaned_title, issues_found)."""
+    issues = []
+    cleaned = title
+
+    for pattern in JUNK_PATTERNS:
+        if re.search(pattern, cleaned, re.IGNORECASE):
+            issues.append(f"junk: {pattern}")
+            cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
+
+    # Clean up extra whitespace and dashes
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    cleaned = re.sub(r'^[-_\s]+|[-_\s]+$', '', cleaned)
+    cleaned = re.sub(r'\s*-\s*$', '', cleaned)
+
+    return cleaned, issues
+
+
+def analyze_author(author):
+    """Analyze author name for issues, return list of issues."""
+    issues = []
+
     # Year in author name
-    if any(str(y) in author for y in range(1950, 2030)):
-        return True, "year in author"
+    if re.search(r'\b(19[0-9]{2}|20[0-2][0-9])\b', author):
+        issues.append("year_in_author")
 
-    # Common title words in author
-    title_indicators = ['the', 'of', 'and', 'a', 'in', 'to', 'for', 'model', 'maris']
-    author_lower = author.lower().split()
-    if any(w in author_lower for w in title_indicators):
-        return True, "title word in author"
+    # Looks like a book title (common title words)
+    title_words = ['the', 'of', 'and', 'a', 'in', 'to', 'for', 'book', 'series', 'volume']
+    author_words = author.lower().split()
+    if any(w in author_words for w in title_words):
+        issues.append("title_words_in_author")
 
-    # Title looks like "First Last" name pattern
-    title_parts = title.split()
-    if len(title_parts) == 2 and all(p and p[0].isupper() for p in title_parts):
-        if not any(w in title.lower() for w in ['the', 'of', 'and', 'a']):
-            return True, "title looks like author name"
+    # LastName, FirstName format
+    if re.match(r'^[A-Z][a-z]+,\s+[A-Z][a-z]+', author):
+        issues.append("lastname_firstname_format")
 
-    # Comma in author (LastName, FirstName format)
-    if ',' in author and author.count(',') == 1:
-        return True, "comma in author name"
+    # Format indicators
+    if re.search(r'\.(epub|pdf|mp3|m4b)|(\[|\]|\{|\})', author, re.IGNORECASE):
+        issues.append("format_junk_in_author")
 
-    # Format indicators in author
-    format_indicators = ['epub', 'pdf', 'mp3', 'm4b', 'r1.', 'r2.', '[', ']']
-    if any(ind in author.lower() for ind in format_indicators):
-        return True, "format indicator in author"
+    # Narrator included (usually with hyphen)
+    if re.search(r'\s*-\s*[A-Z][a-z]+\s+[A-Z][a-z]+$', author):
+        issues.append("possible_narrator_in_author")
 
-    return False, None
+    # Just numbers
+    if re.match(r'^\d+$', author):
+        issues.append("author_is_just_numbers")
 
-def scan_library(config):
-    """Scan library for books needing attention."""
+    # Starts with number (might be book title)
+    if re.match(r'^\d+\s', author):
+        issues.append("author_starts_with_number")
+
+    # Contains "Book N" or "Part N" - probably a title
+    if re.search(r'\bbook\s*\d|\bpart\s*\d|\bvolume\s*\d', author, re.IGNORECASE):
+        issues.append("author_contains_book_number")
+
+    return issues
+
+
+def analyze_title(title, author):
+    """Analyze title for issues, return list of issues."""
+    issues = []
+
+    # Author name repeated in title
+    author_parts = author.lower().split()
+    if len(author_parts) >= 2:
+        if author.lower() in title.lower():
+            issues.append("author_in_title")
+        # Check for "by Author" pattern
+        if re.search(rf'\bby\s+{re.escape(author)}\b', title, re.IGNORECASE):
+            issues.append("by_author_in_title")
+
+    # Year in title (but not book number like "1984")
+    year_match = re.search(r'\(?(19[5-9][0-9]|20[0-2][0-9])\)?', title)
+    if year_match:
+        issues.append("year_in_title")
+
+    # Quality/bitrate info
+    if re.search(r'\d+k\b|\d+kbps|\d+mb|\d+gb', title, re.IGNORECASE):
+        issues.append("quality_info_in_title")
+
+    # Narrator name pattern (Name) at end
+    if re.search(r'\([A-Z][a-z]+\)\s*$', title):
+        issues.append("possible_narrator_in_title")
+
+    # Duration pattern HH.MM.SS
+    if re.search(r'\d{1,2}\.\d{2}\.\d{2}', title):
+        issues.append("duration_in_title")
+
+    # Series prefix like "Series Name Book 1 -"
+    if re.search(r'^.+\s+book\s+\d+\s*[-:]\s*.+', title, re.IGNORECASE):
+        issues.append("series_prefix_format")
+
+    # Brackets with numbers (catalog IDs)
+    if re.search(r'\[\d{4,}\]', title):
+        issues.append("catalog_id_in_title")
+
+    # Title looks like author name (just 2 capitalized words)
+    title_words = title.split()
+    if len(title_words) == 2 and all(w[0].isupper() for w in title_words if w):
+        if not any(w.lower() in ['the', 'a', 'of', 'and'] for w in title_words):
+            issues.append("title_looks_like_author")
+
+    return issues
+
+
+def find_audio_files(directory):
+    """Recursively find all audio files in directory."""
+    audio_files = []
+    for root, dirs, files in os.walk(directory):
+        for f in files:
+            ext = os.path.splitext(f)[1].lower()
+            if ext in AUDIO_EXTENSIONS:
+                audio_files.append(os.path.join(root, f))
+    return audio_files
+
+
+def get_file_signature(filepath, sample_size=8192):
+    """Get a signature for duplicate detection (size + partial hash)."""
+    try:
+        size = os.path.getsize(filepath)
+        with open(filepath, 'rb') as f:
+            sample = f.read(sample_size)
+        partial_hash = hashlib.md5(sample).hexdigest()[:16]
+        return f"{size}_{partial_hash}"
+    except:
+        return None
+
+
+def deep_scan_library(config):
+    """
+    Deep scan library - the AUTISTIC LIBRARIAN approach.
+    Finds ALL issues, duplicates, and structural problems.
+    """
     conn = get_db()
     c = conn.cursor()
 
     scanned = 0
     queued = 0
+    issues_found = {}  # path -> list of issues
+
+    # Track files for duplicate detection
+    file_signatures = {}  # signature -> list of paths
+    file_names = {}  # basename -> list of paths
+
+    logger.info("=== DEEP LIBRARY SCAN STARTING ===")
 
     for lib_path_str in config.get('library_paths', []):
         lib_path = Path(lib_path_str)
@@ -273,46 +436,126 @@ def scan_library(config):
             logger.warning(f"Library path not found: {lib_path}")
             continue
 
+        logger.info(f"Scanning: {lib_path}")
+
+        # First pass: Find all audio files to understand actual book locations
+        all_audio_files = find_audio_files(lib_path)
+        logger.info(f"Found {len(all_audio_files)} audio files")
+
+        # Track file signatures for duplicate detection
+        for audio_file in all_audio_files:
+            sig = get_file_signature(audio_file)
+            if sig:
+                if sig not in file_signatures:
+                    file_signatures[sig] = []
+                file_signatures[sig].append(audio_file)
+
+            basename = os.path.basename(audio_file).lower()
+            if basename not in file_names:
+                file_names[basename] = []
+            file_names[basename].append(audio_file)
+
+        # Second pass: Analyze folder structure
         for author_dir in lib_path.iterdir():
             if not author_dir.is_dir():
                 continue
+
+            author = author_dir.name
+            author_issues = analyze_author(author)
+
+            # Check if "author" folder is actually a book (has audio files directly)
+            direct_audio = [f for f in author_dir.iterdir()
+                          if f.is_file() and f.suffix.lower() in AUDIO_EXTENSIONS]
+            if direct_audio:
+                # This "author" folder might actually be a book!
+                issues_found[str(author_dir)] = author_issues + ["author_folder_has_audio_files"]
+                logger.warning(f"Author folder has audio files directly: {author}")
+
+            # Check if author folder has NO book subfolders (just disc folders)
+            subdirs = [d for d in author_dir.iterdir() if d.is_dir()]
+            if subdirs:
+                all_disc_folders = all(is_disc_chapter_folder(d.name) for d in subdirs)
+                if all_disc_folders:
+                    issues_found[str(author_dir)] = author_issues + ["author_folder_only_has_disc_folders"]
 
             for title_dir in author_dir.iterdir():
                 if not title_dir.is_dir():
                     continue
 
-                path = str(title_dir)
-                author = author_dir.name
                 title = title_dir.name
+                path = str(title_dir)
 
-                # Check if already in database
+                # Skip if this looks like a disc/chapter folder
+                if is_disc_chapter_folder(title):
+                    # But flag the parent!
+                    issues_found[str(author_dir)] = issues_found.get(str(author_dir), []) + [f"has_disc_folder:{title}"]
+                    continue
+
+                # Analyze title
+                title_issues = analyze_title(title, author)
+                cleaned_title, clean_issues = clean_title(title)
+
+                all_issues = author_issues + title_issues + clean_issues
+
+                # Check for nested structure (disc folders inside book folder)
+                nested_dirs = [d for d in title_dir.iterdir() if d.is_dir()]
+                disc_dirs = [d for d in nested_dirs if is_disc_chapter_folder(d.name)]
+                if disc_dirs:
+                    all_issues.append(f"has_{len(disc_dirs)}_disc_folders")
+
+                # Check for ebook files mixed with audiobooks
+                ebook_files = [f for f in title_dir.rglob('*') if f.suffix.lower() in EBOOK_EXTENSIONS]
+                if ebook_files:
+                    all_issues.append(f"has_{len(ebook_files)}_ebook_files")
+
+                # Store issues
+                if all_issues:
+                    issues_found[path] = all_issues
+
+                # Add to database
                 c.execute('SELECT id, status FROM books WHERE path = ?', (path,))
                 existing = c.fetchone()
 
                 if existing:
                     if existing['status'] in ['verified', 'fixed']:
                         continue
+                    book_id = existing['id']
                 else:
-                    # Add to database
                     c.execute('''INSERT INTO books (path, current_author, current_title, status)
                                  VALUES (?, ?, ?, 'pending')''', (path, author, title))
                     conn.commit()
+                    book_id = c.lastrowid
                     scanned += 1
 
-                # Check if suspicious
-                suspicious, reason = looks_suspicious(author, title)
-                if suspicious:
-                    # Get book ID
-                    c.execute('SELECT id FROM books WHERE path = ?', (path,))
-                    book = c.fetchone()
-                    if book:
-                        # Check if already in queue
-                        c.execute('SELECT id FROM queue WHERE book_id = ?', (book['id'],))
-                        if not c.fetchone():
-                            c.execute('''INSERT INTO queue (book_id, reason) VALUES (?, ?)''',
-                                     (book['id'], reason))
-                            conn.commit()
-                            queued += 1
+                # Add to queue if has issues
+                if all_issues:
+                    reason = "; ".join(all_issues[:3])  # First 3 issues
+                    if len(all_issues) > 3:
+                        reason += f" (+{len(all_issues)-3} more)"
+
+                    c.execute('SELECT id FROM queue WHERE book_id = ?', (book_id,))
+                    if not c.fetchone():
+                        c.execute('''INSERT INTO queue (book_id, reason, priority)
+                                    VALUES (?, ?, ?)''',
+                                 (book_id, reason, min(len(all_issues), 10)))
+                        conn.commit()
+                        queued += 1
+
+    # Third pass: Flag duplicates
+    logger.info("Checking for duplicates...")
+    duplicate_count = 0
+
+    for sig, paths in file_signatures.items():
+        if len(paths) > 1:
+            duplicate_count += 1
+            for p in paths:
+                book_dir = str(Path(p).parent)
+                if book_dir in issues_found:
+                    issues_found[book_dir].append(f"duplicate_file:{os.path.basename(p)}")
+                else:
+                    issues_found[book_dir] = [f"duplicate_file:{os.path.basename(p)}"]
+
+    logger.info(f"Found {duplicate_count} potential duplicate file sets")
 
     # Update daily stats
     today = datetime.now().strftime('%Y-%m-%d')
@@ -323,8 +566,17 @@ def scan_library(config):
     conn.commit()
     conn.close()
 
-    logger.info(f"Scan complete: {scanned} new books, {queued} added to queue")
+    logger.info(f"=== DEEP SCAN COMPLETE ===")
+    logger.info(f"Scanned: {scanned} new books")
+    logger.info(f"Queued: {queued} books with issues")
+    logger.info(f"Total issues found: {len(issues_found)} locations")
+
     return scanned, queued
+
+
+def scan_library(config):
+    """Wrapper that calls deep scan."""
+    return deep_scan_library(config)
 
 def process_queue(config, limit=None):
     """Process items in the queue."""
