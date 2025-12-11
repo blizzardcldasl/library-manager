@@ -11,14 +11,16 @@ Features:
 - Multi-provider AI (Gemini, OpenRouter, Ollama)
 """
 
-APP_VERSION = "0.9.0-beta.11"
+APP_VERSION = "0.9.0-beta.13"
 GITHUB_REPO = "deucebucket/library-manager"  # Your GitHub repo
 
 # Versioning Guide:
 # 0.9.0-beta.1  = Initial beta (basic features)
 # 0.9.0-beta.2  = Garbage filtering, series grouping, dismiss errors
 # 0.9.0-beta.3  = UI cleanup - merged Advanced/Tools tabs
-# 0.9.0-beta.4  = Current (improved series detection, DB locking fix, system folder filtering)
+# 0.9.0-beta.4  = Improved series detection, DB locking fix, system folder filtering
+# 0.9.0-beta.11 = Series folder lib_path fix
+# 0.9.0-beta.12 = CRITICAL SAFETY: Path sanitization, library boundary checks, depth validation
 # 0.9.0-rc.1    = Release candidate (feature complete, final testing)
 # 1.0.0         = First stable release (everything works!)
 
@@ -33,7 +35,7 @@ import requests
 import re
 from pathlib import Path
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request, jsonify, redirect, url_for
+from flask import Flask, render_template, request, jsonify, redirect, url_for, send_file
 
 
 # ============== SMART MATCHING UTILITIES ==============
@@ -260,7 +262,8 @@ DEFAULT_CONFIG = {
     "protect_author_changes": True,  # Require approval if author changes completely
     "enabled": True,
     "update_channel": "beta",  # "stable", "beta", or "nightly"
-    "naming_format": "author/title"  # "author/title", "author - title", "author/series/title"
+    "naming_format": "author/title",  # "author/title", "author - title", "custom"
+    "custom_naming_template": "{author}/{title}"  # Custom template with {author}, {title}, {series}, etc.
 }
 
 DEFAULT_SECRETS = {
@@ -498,47 +501,172 @@ def rate_limit_wait(api_name):
         API_RATE_LIMITS[api_name]['last_call'] = time.time()
 
 
-def build_new_path(lib_path, author, title, series=None, series_num=None, narrator=None, year=None, config=None):
+def sanitize_path_component(name):
+    """Sanitize a path component to prevent directory traversal and invalid chars.
+
+    CRITICAL SAFETY FUNCTION - prevents catastrophic file moves.
+    """
+    if not name or not isinstance(name, str):
+        return None
+
+    # Strip whitespace
+    name = name.strip()
+
+    # Block empty strings
+    if not name:
+        return None
+
+    # Block directory traversal attempts
+    if '..' in name or name.startswith('/') or name.startswith('\\'):
+        logger.warning(f"BLOCKED dangerous path component: {name}")
+        return None
+
+    # Remove/replace dangerous characters
+    # Windows: < > : " / \ | ? *
+    # Also remove control characters
+    dangerous_chars = '<>:"/\\|?*\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f'
+    for char in dangerous_chars:
+        name = name.replace(char, '')
+
+    # Final strip and check
+    name = name.strip('. ')  # Windows doesn't like trailing dots/spaces
+    if not name or len(name) < 2:
+        return None
+
+    return name
+
+
+def build_new_path(lib_path, author, title, series=None, series_num=None, narrator=None, year=None,
+                   edition=None, variant=None, config=None):
     """Build a new path based on the naming format configuration.
 
     Audiobookshelf-compatible format (when series_grouping enabled):
     - Narrator in curly braces: {Ray Porter}
     - Series number prefix: "1 - Title"
     - Year in parentheses: (2003)
+    - Edition in brackets: [30th Anniversary Edition]
+    - Variant in brackets: [Graphic Audio]
+
+    SAFETY: Returns None if path would be invalid/dangerous.
     """
     naming_format = config.get('naming_format', 'author/title') if config else 'author/title'
     series_grouping = config.get('series_grouping', False) if config else False
 
+    # CRITICAL SAFETY: Sanitize all path components
+    safe_author = sanitize_path_component(author)
+    safe_title = sanitize_path_component(title)
+    safe_series = sanitize_path_component(series) if series else None
+
+    # CRITICAL: Reject if author or title are invalid
+    if not safe_author or not safe_title:
+        logger.error(f"BLOCKED: Invalid author '{author}' or title '{title}' - would create dangerous path")
+        return None
+
     # Build title folder name
-    title_folder = title
+    title_folder = safe_title
 
     # Add series number prefix if series grouping enabled and we have series info
-    if series_grouping and series and series_num:
-        title_folder = f"{series_num} - {title}"
+    if series_grouping and safe_series and series_num:
+        title_folder = f"{series_num} - {safe_title}"
 
-    # Add year if present
-    if year:
+    # Add edition/variant in brackets (e.g., [30th Anniversary Edition], [Graphic Audio])
+    # These distinguish different versions of the same book
+    if variant:
+        safe_variant = sanitize_path_component(variant)
+        if safe_variant:
+            title_folder = f"{title_folder} [{safe_variant}]"
+    elif edition:
+        safe_edition = sanitize_path_component(edition)
+        if safe_edition:
+            title_folder = f"{title_folder} [{safe_edition}]"
+
+    # Add year if present (and no edition/variant already added for version distinction)
+    if year and not edition and not variant:
         title_folder = f"{title_folder} ({year})"
 
     # Add narrator - curly braces for ABS format, parentheses otherwise
     if narrator:
-        if series_grouping:
-            # ABS format uses curly braces for narrator
-            title_folder = f"{title_folder} {{{narrator}}}"
-        else:
-            # Legacy format uses parentheses
-            title_folder = f"{title_folder} ({narrator})"
+        safe_narrator = sanitize_path_component(narrator)
+        if safe_narrator:
+            if series_grouping:
+                # ABS format uses curly braces for narrator
+                title_folder = f"{title_folder} {{{safe_narrator}}}"
+            else:
+                # Legacy format uses parentheses
+                title_folder = f"{title_folder} ({safe_narrator})"
 
-    if naming_format == 'author - title':
+    if naming_format == 'custom':
+        # Custom template: parse and replace tags
+        custom_template = config.get('custom_naming_template', '{author}/{title}') if config else '{author}/{title}'
+
+        # Prepare all available data for replacement
+        safe_narrator = sanitize_path_component(narrator) if narrator else ''
+        safe_year = str(year) if year else ''
+        safe_edition = sanitize_path_component(edition) if edition else ''
+        safe_variant = sanitize_path_component(variant) if variant else ''
+        safe_series_num = str(series_num) if series_num else ''
+
+        # Build the path from template
+        path_str = custom_template
+        path_str = path_str.replace('{author}', safe_author)
+        path_str = path_str.replace('{title}', safe_title)
+        path_str = path_str.replace('{series}', safe_series or '')
+        path_str = path_str.replace('{series_num}', safe_series_num)
+        path_str = path_str.replace('{narrator}', safe_narrator)
+        path_str = path_str.replace('{year}', safe_year)
+        path_str = path_str.replace('{edition}', safe_edition)
+        path_str = path_str.replace('{variant}', safe_variant)
+
+        # Clean up empty brackets/parens from missing optional data
+        import re
+        path_str = re.sub(r'\(\s*\)', '', path_str)  # Empty ()
+        path_str = re.sub(r'\[\s*\]', '', path_str)  # Empty []
+        path_str = re.sub(r'\{\s*\}', '', path_str)  # Empty {} (literal, not tags)
+        path_str = re.sub(r'\s+-\s+(?=-|/|$)', '', path_str)  # Dangling " - "
+        path_str = re.sub(r'/+', '/', path_str)  # Multiple slashes
+        path_str = re.sub(r'\s{2,}', ' ', path_str)  # Multiple spaces
+        path_str = path_str.strip(' /')
+
+        # Split by / to create path components
+        parts = [p.strip() for p in path_str.split('/') if p.strip()]
+        if not parts:
+            logger.error(f"BLOCKED: Custom template resulted in empty path")
+            return None
+
+        result_path = lib_path
+        for part in parts:
+            result_path = result_path / part
+    elif naming_format == 'author - title':
         # Flat structure: Author - Title (single folder)
-        folder_name = f"{author} - {title_folder}"
-        return lib_path / folder_name
-    elif series_grouping and series:
+        folder_name = f"{safe_author} - {title_folder}"
+        result_path = lib_path / folder_name
+    elif series_grouping and safe_series:
         # Series grouping enabled AND book has series: Author/Series/Title
-        return lib_path / author / series / title_folder
+        result_path = lib_path / safe_author / safe_series / title_folder
     else:
         # Default: Author/Title (two-level)
-        return lib_path / author / title_folder
+        result_path = lib_path / safe_author / title_folder
+
+    # CRITICAL SAFETY: Verify path is within library and has minimum depth
+    try:
+        # Resolve to absolute path
+        result_path = result_path.resolve()
+        lib_path_resolved = Path(lib_path).resolve()
+
+        # Ensure result is within library path
+        result_path.relative_to(lib_path_resolved)
+
+        # Ensure minimum depth (at least 1 folder below library root)
+        relative = result_path.relative_to(lib_path_resolved)
+        if len(relative.parts) < 1:
+            logger.error(f"BLOCKED: Path too shallow - would dump files at library root: {result_path}")
+            return None
+
+    except ValueError:
+        logger.error(f"BLOCKED: Path escapes library! lib={lib_path}, result={result_path}")
+        return None
+
+    return result_path
 
 
 def clean_search_title(messy_name):
@@ -557,6 +685,85 @@ def clean_search_title(messy_name):
     # Remove leading/trailing junk
     clean = clean.strip(' -_.')
     return clean
+
+
+# BookDB API endpoint (our private metadata service)
+BOOKDB_API_URL = "https://bookdb.deucebucket.com"
+
+def search_bookdb(title, author=None, api_key=None):
+    """
+    Search our private BookDB metadata service.
+    Uses fuzzy matching via Qdrant vectors - great for messy filenames.
+    Returns series info including book position if found.
+    """
+    if not api_key:
+        return None
+
+    try:
+        # Build the filename to match - include author if we have it
+        filename = f"{author} - {title}" if author else title
+
+        resp = requests.post(
+            f"{BOOKDB_API_URL}/match",
+            json={"filename": filename},
+            headers={"X-API-Key": api_key},
+            timeout=10
+        )
+
+        if resp.status_code != 200:
+            logger.debug(f"BookDB returned status {resp.status_code}")
+            return None
+
+        data = resp.json()
+
+        # Check confidence threshold
+        if data.get('confidence', 0) < 0.5:
+            logger.debug(f"BookDB match below confidence threshold: {data.get('confidence')}")
+            return None
+
+        series = data.get('series')
+        books = data.get('books', [])
+
+        if not series:
+            return None
+
+        # Find the best matching book in the series
+        best_book = None
+        if books:
+            # Try to match title to a specific book in series
+            title_lower = title.lower()
+            for book in books:
+                book_title = book.get('title', '').lower()
+                if title_lower in book_title or book_title in title_lower:
+                    best_book = book
+                    break
+            # If no specific match, use first book
+            if not best_book:
+                best_book = books[0]
+
+        result = {
+            'title': best_book.get('title') if best_book else series.get('name'),
+            'author': series.get('author_name', ''),
+            'year': best_book.get('year_published') if best_book else None,
+            'series': series.get('name'),
+            'series_num': best_book.get('series_position') if best_book else None,
+            'variant': series.get('variant'),  # Graphic Audio, BBC Radio, etc.
+            'edition': best_book.get('edition') if best_book else None,
+            'source': 'bookdb',
+            'confidence': data.get('confidence', 0)
+        }
+
+        if result['title'] and result['author']:
+            logger.info(f"BookDB found: {result['author']} - {result['title']}" +
+                       (f" ({result['series']} #{result['series_num']})" if result['series'] else "") +
+                       f" [confidence: {result['confidence']:.2f}]")
+            return result
+        return None
+
+    except Exception as e:
+        logger.debug(f"BookDB search failed: {e}")
+        return None
+
 
 def search_openlibrary(title, author=None):
     """Search OpenLibrary for book metadata. Free, no API key needed."""
@@ -819,7 +1026,14 @@ def lookup_book_metadata(messy_name, config, folder_path=None):
             return None
         return result
 
-    # 1. Try Audnexus first (best for audiobooks, pulls from Audible)
+    # 0. Try BookDB first (our private metadata service with fuzzy matching)
+    bookdb_key = config.get('bookdb_api_key')
+    if bookdb_key:
+        result = validate_result(search_bookdb(clean_title, author=author_hint, api_key=bookdb_key), clean_title)
+        if result:
+            return result
+
+    # 1. Try Audnexus (best for audiobooks, pulls from Audible)
     result = validate_result(search_audnexus(clean_title, author=author_hint), clean_title)
     if result:
         return result
@@ -858,6 +1072,7 @@ def gather_all_api_candidates(title, author=None, config=None):
 
     # Search each API and collect all results
     apis = [
+        ('BookDB', lambda t, a: search_bookdb(t, a, config.get('bookdb_api_key') if config else None)),
         ('Audnexus', search_audnexus),
         ('OpenLibrary', search_openlibrary),
         ('GoogleBooks', lambda t, a: search_google_books(t, a, config.get('google_books_api_key') if config else None)),
@@ -2068,6 +2283,8 @@ def process_queue(config, limit=None):
         new_series = (result.get('series') or '').strip() or None  # Series name
         new_series_num = result.get('series_num')  # Series number (can be int or string like "1" or "Book 1")
         new_year = result.get('year')  # Publication year
+        new_edition = (result.get('edition') or '').strip() or None  # Anniversary, Unabridged, etc.
+        new_variant = (result.get('variant') or '').strip() or None  # Graphic Audio, Full Cast, BBC Radio
 
         # If AI didn't detect series, try to extract it from title patterns
         # First try the ORIGINAL title (has series info like "The Reckoners, Book 2 - Firefight")
@@ -2113,10 +2330,38 @@ def process_queue(config, limit=None):
         # Check if fix needed (also check narrator change)
         if new_author != row['current_author'] or new_title != row['current_title'] or new_narrator:
             old_path = Path(row['path'])
-            lib_path = old_path.parent.parent
+
+            # Find which configured library this book belongs to
+            # (Don't assume 2-level structure - series_grouping uses 3 levels)
+            lib_path = None
+            for lp in config.get('library_paths', []):
+                lp_path = Path(lp)
+                try:
+                    old_path.relative_to(lp_path)
+                    lib_path = lp_path
+                    break
+                except ValueError:
+                    continue
+
+            # Fallback if not found in configured libraries
+            if lib_path is None:
+                lib_path = old_path.parent.parent
+                logger.warning(f"Book path {old_path} not under any configured library, guessing lib_path={lib_path}")
+
             new_path = build_new_path(lib_path, new_author, new_title,
                                       series=new_series, series_num=new_series_num,
-                                      narrator=new_narrator, year=new_year, config=config)
+                                      narrator=new_narrator, year=new_year,
+                                      edition=new_edition, variant=new_variant, config=config)
+
+            # CRITICAL SAFETY: If path building failed, skip this item
+            if new_path is None:
+                logger.error(f"SAFETY BLOCK: Invalid path for '{new_author}' / '{new_title}' - skipping to prevent data loss")
+                c.execute('DELETE FROM queue WHERE id = ?', (row['queue_id'],))
+                c.execute('UPDATE books SET status = ?, error_message = ? WHERE id = ?',
+                         ('error', 'Path validation failed - unsafe author/title', row['book_id']))
+                conn.commit()
+                processed += 1
+                continue
 
             # Check for drastic author change
             drastic_change = is_drastic_author_change(row['current_author'], new_author)
@@ -2173,7 +2418,18 @@ def process_queue(config, limit=None):
                 # Recalculate new_path with potentially updated author/title/narrator
                 new_path = build_new_path(lib_path, new_author, new_title,
                                           series=new_series, series_num=new_series_num,
-                                          narrator=new_narrator, year=new_year, config=config)
+                                          narrator=new_narrator, year=new_year,
+                                          edition=new_edition, variant=new_variant, config=config)
+
+                # CRITICAL SAFETY: Check recalculated path
+                if new_path is None:
+                    logger.error(f"SAFETY BLOCK: Invalid recalculated path for '{new_author}' / '{new_title}'")
+                    c.execute('DELETE FROM queue WHERE id = ?', (row['queue_id'],))
+                    c.execute('UPDATE books SET status = ?, error_message = ? WHERE id = ?',
+                             ('error', 'Path validation failed after verification', row['book_id']))
+                    conn.commit()
+                    processed += 1
+                    continue
 
             # Only auto-fix if enabled AND NOT a drastic change
             # Drastic changes ALWAYS require manual approval to prevent data loss
@@ -2186,18 +2442,52 @@ def process_queue(config, limit=None):
                         # Destination already exists - check if it has files
                         existing_files = list(new_path.iterdir())
                         if existing_files:
-                            # DON'T MERGE - this is likely a different narrator version
-                            # Mark as conflict and skip
-                            logger.warning(f"CONFLICT: {new_path} already exists with files - skipping to preserve different versions")
-                            c.execute('''INSERT INTO history (book_id, old_author, old_title, new_author, new_title, old_path, new_path, status, error_message)
-                                         VALUES (?, ?, ?, ?, ?, ?, ?, 'error', 'Destination exists - possible different narrator version')''',
-                                     (row['book_id'], row['current_author'], row['current_title'],
-                                      new_author, new_title, str(old_path), str(new_path)))
-                            c.execute('UPDATE books SET status = ?, error_message = ? WHERE id = ?',
-                                     ('conflict', 'Destination folder exists with files', row['book_id']))
-                            c.execute('DELETE FROM queue WHERE id = ?', (row['queue_id'],))
-                            processed += 1
-                            continue
+                            # Try to find a unique path by adding version distinguishers
+                            logger.info(f"CONFLICT: {new_path} exists, trying version-aware naming...")
+                            resolved_path = None
+
+                            # Try distinguishers in order: narrator, variant, edition, year
+                            # Only try if we have the data AND it's not already in the path
+                            distinguishers_to_try = []
+
+                            if new_narrator and new_narrator not in str(new_path):
+                                distinguishers_to_try.append(('narrator', new_narrator, None, None))
+                            if new_variant and new_variant not in str(new_path):
+                                distinguishers_to_try.append(('variant', None, None, new_variant))
+                            if new_edition and new_edition not in str(new_path):
+                                distinguishers_to_try.append(('edition', None, new_edition, None))
+                            if new_year and str(new_year) not in str(new_path):
+                                distinguishers_to_try.append(('year', None, None, None))
+
+                            for dist_type, narrator_val, edition_val, variant_val in distinguishers_to_try:
+                                test_path = build_new_path(
+                                    lib_path, new_author, new_title,
+                                    series=new_series, series_num=new_series_num,
+                                    narrator=narrator_val or new_narrator,
+                                    year=new_year if dist_type == 'year' else None,
+                                    edition=edition_val,
+                                    variant=variant_val,
+                                    config=config
+                                )
+                                if test_path and not test_path.exists():
+                                    resolved_path = test_path
+                                    logger.info(f"Resolved conflict using {dist_type}: {resolved_path}")
+                                    break
+
+                            if resolved_path:
+                                new_path = resolved_path
+                            else:
+                                # Couldn't resolve - mark as conflict
+                                logger.warning(f"CONFLICT: {new_path} exists - no unique distinguisher found")
+                                c.execute('''INSERT INTO history (book_id, old_author, old_title, new_author, new_title, old_path, new_path, status, error_message)
+                                             VALUES (?, ?, ?, ?, ?, ?, ?, 'error', 'Destination exists - could not resolve version conflict')''',
+                                         (row['book_id'], row['current_author'], row['current_title'],
+                                          new_author, new_title, str(old_path), str(new_path)))
+                                c.execute('UPDATE books SET status = ?, error_message = ? WHERE id = ?',
+                                         ('conflict', 'Destination folder exists - multiple versions detected', row['book_id']))
+                                c.execute('DELETE FROM queue WHERE id = ?', (row['queue_id'],))
+                                processed += 1
+                                continue
                         else:
                             # Destination is empty folder - safe to use it
                             shutil.move(str(old_path), str(new_path.parent / (new_path.name + "_temp")))
@@ -2210,7 +2500,8 @@ def process_queue(config, limit=None):
                                 old_path.parent.rmdir()
                         except OSError:
                             pass  # Parent not empty, that's fine
-                    else:
+
+                    if not new_path.exists():
                         # Destination doesn't exist - simple rename
                         new_path.parent.mkdir(parents=True, exist_ok=True)
                         shutil.move(str(old_path), str(new_path))
@@ -2291,6 +2582,55 @@ def apply_fix(history_id):
 
     old_path = Path(fix['old_path'])
     new_path = Path(fix['new_path'])
+
+    # CRITICAL SAFETY: Validate paths before any file operations
+    config = load_config()
+    library_paths = [Path(p).resolve() for p in config.get('library_paths', [])]
+
+    # Check old_path is in a library
+    old_in_library = False
+    for lib in library_paths:
+        try:
+            old_path.resolve().relative_to(lib)
+            old_in_library = True
+            break
+        except ValueError:
+            continue
+
+    # Check new_path is in a library
+    new_in_library = False
+    for lib in library_paths:
+        try:
+            new_path.resolve().relative_to(lib)
+            new_in_library = True
+            break
+        except ValueError:
+            continue
+
+    if not old_in_library or not new_in_library:
+        error_msg = f"SAFETY BLOCK: Path outside library! old_in_lib={old_in_library}, new_in_lib={new_in_library}"
+        logger.error(error_msg)
+        c.execute('UPDATE history SET status = ?, error_message = ? WHERE id = ?',
+                 ('error', error_msg, history_id))
+        conn.commit()
+        conn.close()
+        return False, error_msg
+
+    # Check new_path has reasonable depth (at least 2 components: Author/Title)
+    for lib in library_paths:
+        try:
+            relative = new_path.resolve().relative_to(lib)
+            if len(relative.parts) < 2:
+                error_msg = f"SAFETY BLOCK: Path too shallow ({len(relative.parts)} levels) - would dump at author level"
+                logger.error(error_msg)
+                c.execute('UPDATE history SET status = ?, error_message = ? WHERE id = ?',
+                         ('error', error_msg, history_id))
+                conn.commit()
+                conn.close()
+                return False, error_msg
+            break
+        except ValueError:
+            continue
 
     if not old_path.exists():
         error_msg = f"Source folder no longer exists: {old_path}"
@@ -2635,6 +2975,7 @@ def settings_page():
         config['google_books_api_key'] = request.form.get('google_books_api_key', '').strip() or None
         config['update_channel'] = request.form.get('update_channel', 'stable')
         config['naming_format'] = request.form.get('naming_format', 'author/title')
+        config['custom_naming_template'] = request.form.get('custom_naming_template', '{author}/{title}').strip()
 
         # Save config (without secrets)
         save_config(config)
@@ -3401,6 +3742,773 @@ def api_bug_report():
 """
 
     return jsonify({'report': report})
+
+
+# ============== AUDIOBOOKSHELF INTEGRATION ==============
+
+def get_abs_client():
+    """Get configured ABS client or None if not configured."""
+    from abs_client import ABSClient
+    config = load_config()
+    abs_url = config.get('abs_url', '').strip()
+    abs_token = config.get('abs_api_token', '').strip()
+    if abs_url and abs_token:
+        return ABSClient(abs_url, abs_token)
+    return None
+
+
+@app.route('/abs')
+def abs_dashboard():
+    """ABS integration dashboard - user progress tracking."""
+    config = load_config()
+    abs_connected = bool(config.get('abs_url') and config.get('abs_api_token'))
+    return render_template('abs_dashboard.html',
+                           config=config,
+                           abs_connected=abs_connected,
+                           version=APP_VERSION)
+
+
+@app.route('/api/abs/test', methods=['POST'])
+def api_abs_test():
+    """Test ABS connection."""
+    data = request.get_json() or {}
+    abs_url = data.get('url', '').strip()
+    abs_token = data.get('token', '').strip()
+
+    if not abs_url or not abs_token:
+        return jsonify({'success': False, 'error': 'URL and API token required'})
+
+    from abs_client import ABSClient
+    client = ABSClient(abs_url, abs_token)
+    result = client.test_connection()
+    return jsonify(result)
+
+
+@app.route('/api/abs/connect', methods=['POST'])
+def api_abs_connect():
+    """Save ABS connection settings."""
+    data = request.get_json() or {}
+    abs_url = data.get('url', '').strip()
+    abs_token = data.get('token', '').strip()
+
+    if not abs_url or not abs_token:
+        return jsonify({'success': False, 'error': 'URL and API token required'})
+
+    # Test connection first
+    from abs_client import ABSClient
+    client = ABSClient(abs_url, abs_token)
+    result = client.test_connection()
+
+    if result.get('success'):
+        # Save to config
+        config = load_config()
+        config['abs_url'] = abs_url
+        config['abs_api_token'] = abs_token
+        save_config(config)
+        return jsonify({'success': True, 'message': f"Connected as {result.get('username')}"})
+    else:
+        return jsonify({'success': False, 'error': result.get('error', 'Connection failed')})
+
+
+@app.route('/api/abs/users')
+def api_abs_users():
+    """Get all ABS users."""
+    client = get_abs_client()
+    if not client:
+        return jsonify({'success': False, 'error': 'ABS not configured'})
+
+    users = client.get_users()
+    return jsonify({
+        'success': True,
+        'users': [{'id': u.id, 'username': u.username, 'type': u.type} for u in users]
+    })
+
+
+@app.route('/api/abs/libraries')
+def api_abs_libraries():
+    """Get all ABS libraries."""
+    client = get_abs_client()
+    if not client:
+        return jsonify({'success': False, 'error': 'ABS not configured'})
+
+    libraries = client.get_libraries()
+    return jsonify({'success': True, 'libraries': libraries})
+
+
+@app.route('/api/abs/library/<library_id>/progress')
+def api_abs_library_progress(library_id):
+    """Get all items in library with user progress."""
+    client = get_abs_client()
+    if not client:
+        return jsonify({'success': False, 'error': 'ABS not configured'})
+
+    items = client.get_library_with_all_progress(library_id)
+
+    # Simplify for JSON
+    result = []
+    for item in items:
+        media = item.get('media', {})
+        metadata = media.get('metadata', {})
+        result.append({
+            'id': item.get('id'),
+            'title': metadata.get('title', 'Unknown'),
+            'author': metadata.get('authorName', 'Unknown'),
+            'duration': media.get('duration', 0),
+            'user_progress': item.get('user_progress', {}),
+            'progress_summary': item.get('progress_summary', {})
+        })
+
+    return jsonify({'success': True, 'items': result})
+
+
+@app.route('/api/abs/archivable/<library_id>')
+def api_abs_archivable(library_id):
+    """Get items safe to archive (everyone finished, no one in progress)."""
+    client = get_abs_client()
+    if not client:
+        return jsonify({'success': False, 'error': 'ABS not configured'})
+
+    min_users = request.args.get('min_users', 1, type=int)
+    items = client.get_archivable_items(library_id, min_users_finished=min_users)
+
+    result = []
+    for item in items:
+        media = item.get('media', {})
+        metadata = media.get('metadata', {})
+        result.append({
+            'id': item.get('id'),
+            'title': metadata.get('title', 'Unknown'),
+            'author': metadata.get('authorName', 'Unknown'),
+            'users_finished': item.get('progress_summary', {}).get('users_finished', 0)
+        })
+
+    return jsonify({'success': True, 'items': result, 'count': len(result)})
+
+
+@app.route('/api/abs/untouched/<library_id>')
+def api_abs_untouched(library_id):
+    """Get items no one has started."""
+    client = get_abs_client()
+    if not client:
+        return jsonify({'success': False, 'error': 'ABS not configured'})
+
+    items = client.get_untouched_items(library_id)
+
+    result = []
+    for item in items:
+        media = item.get('media', {})
+        metadata = media.get('metadata', {})
+        result.append({
+            'id': item.get('id'),
+            'title': metadata.get('title', 'Unknown'),
+            'author': metadata.get('authorName', 'Unknown'),
+            'added_at': item.get('addedAt')
+        })
+
+    return jsonify({'success': True, 'items': result, 'count': len(result)})
+
+
+# ============== USER GROUPS (for ABS progress rules) ==============
+
+GROUPS_PATH = BASE_DIR / 'user_groups.json'
+
+DEFAULT_GROUPS_DATA = {
+    'user_groups': [],      # Groups of ABS users (e.g., "Twilight Readers": [wife, daughter1, daughter2])
+    'rules': [],            # Archive rules tied to user groups
+    'author_assignments': {},  # author_name -> group_id (smart assign)
+    'genre_assignments': {},   # genre -> group_id (smart assign)
+    'keep_forever': {          # Never flag these for archive
+        'items': [],           # specific item IDs
+        'authors': [],         # author names
+        'series': []           # series names
+    },
+    'exclude_from_rules': {    # Exclude from auto-rules (but can still manually archive)
+        'authors': [],
+        'genres': []
+    }
+}
+
+
+def load_groups():
+    """Load user groups configuration."""
+    if GROUPS_PATH.exists():
+        try:
+            with open(GROUPS_PATH) as f:
+                data = json.load(f)
+                # Merge with defaults for any missing keys
+                for key, default in DEFAULT_GROUPS_DATA.items():
+                    if key not in data:
+                        data[key] = default
+                return data
+        except:
+            pass
+    return DEFAULT_GROUPS_DATA.copy()
+
+
+def save_groups(groups):
+    """Save user groups configuration."""
+    with open(GROUPS_PATH, 'w') as f:
+        json.dump(groups, f, indent=2)
+
+
+@app.route('/api/abs/groups')
+def api_abs_groups():
+    """Get all groups."""
+    return jsonify(load_groups())
+
+
+@app.route('/api/abs/groups/user', methods=['POST'])
+def api_abs_create_user_group():
+    """Create a user group."""
+    data = request.get_json() or {}
+    name = data.get('name', '').strip()
+    user_ids = data.get('user_ids', [])
+
+    if not name:
+        return jsonify({'success': False, 'error': 'Group name required'})
+
+    groups = load_groups()
+    groups['user_groups'].append({
+        'id': str(len(groups['user_groups']) + 1),
+        'name': name,
+        'user_ids': user_ids
+    })
+    save_groups(groups)
+    return jsonify({'success': True})
+
+
+@app.route('/api/abs/groups/user/<group_id>', methods=['DELETE'])
+def api_abs_delete_user_group(group_id):
+    """Delete a user group."""
+    groups = load_groups()
+    groups['user_groups'] = [g for g in groups['user_groups'] if g['id'] != group_id]
+    save_groups(groups)
+    return jsonify({'success': True})
+
+
+@app.route('/api/abs/groups/rule', methods=['POST'])
+def api_abs_create_rule():
+    """Create an archive rule.
+
+    Example rule:
+    {
+        "name": "Archive when family done",
+        "user_group_id": "1",  # which users must finish
+        "action": "archive",   # what to do
+        "enabled": true
+    }
+    """
+    data = request.get_json() or {}
+
+    groups = load_groups()
+    groups['rules'].append({
+        'id': str(len(groups['rules']) + 1),
+        'name': data.get('name', 'Unnamed Rule'),
+        'user_group_id': data.get('user_group_id'),
+        'action': data.get('action', 'archive'),
+        'enabled': data.get('enabled', True)
+    })
+    save_groups(groups)
+    return jsonify({'success': True})
+
+
+@app.route('/api/abs/check_rules/<library_id>')
+def api_abs_check_rules(library_id):
+    """Check which items match archive rules (with smart assignments)."""
+    client = get_abs_client()
+    if not client:
+        return jsonify({'success': False, 'error': 'ABS not configured'})
+
+    groups = load_groups()
+    items = client.get_library_with_all_progress(library_id)
+
+    # Build lookups
+    user_groups = {g['id']: set(g['user_ids']) for g in groups.get('user_groups', [])}
+    author_assignments = groups.get('author_assignments', {})
+    genre_assignments = groups.get('genre_assignments', {})
+    keep_forever = groups.get('keep_forever', {})
+    exclude_from_rules = groups.get('exclude_from_rules', {})
+
+    matches = []
+    for item in items:
+        media = item.get('media', {})
+        metadata = media.get('metadata', {})
+        item_id = item.get('id')
+        title = metadata.get('title', 'Unknown')
+        author = metadata.get('authorName', 'Unknown')
+        genres = metadata.get('genres', [])
+        series_name = metadata.get('seriesName', '')
+
+        # Check keep forever - skip if protected
+        if item_id in keep_forever.get('items', []):
+            continue
+        if author.lower() in [a.lower() for a in keep_forever.get('authors', [])]:
+            continue
+        if series_name and series_name.lower() in [s.lower() for s in keep_forever.get('series', [])]:
+            continue
+
+        # Check exclude from rules
+        if author.lower() in [a.lower() for a in exclude_from_rules.get('authors', [])]:
+            continue
+        if any(g.lower() in [eg.lower() for eg in exclude_from_rules.get('genres', [])] for g in genres):
+            continue
+
+        # Determine which group should handle this item (smart assignment)
+        assigned_group_id = None
+
+        # Check author assignment first
+        for assigned_author, group_id in author_assignments.items():
+            if assigned_author.lower() in author.lower():
+                assigned_group_id = group_id
+                break
+
+        # Check genre assignment if no author match
+        if not assigned_group_id:
+            for genre in genres:
+                if genre.lower() in [g.lower() for g in genre_assignments.keys()]:
+                    assigned_group_id = genre_assignments.get(genre)
+                    break
+
+        # Check all rules (both assigned and general)
+        user_progress = item.get('user_progress', {})
+        finished_users = {uid for uid, p in user_progress.items() if p.get('is_finished')}
+
+        for rule in groups.get('rules', []):
+            if not rule.get('enabled'):
+                continue
+
+            rule_group_id = rule.get('user_group_id')
+            group_users = user_groups.get(rule_group_id, set())
+
+            if not group_users:
+                continue
+
+            # If item has smart assignment, only use that group's rules
+            if assigned_group_id and rule_group_id != assigned_group_id:
+                continue
+
+            # Check if all group members finished
+            if group_users.issubset(finished_users):
+                matches.append({
+                    'rule_name': rule.get('name'),
+                    'action': rule.get('action'),
+                    'item_id': item_id,
+                    'title': title,
+                    'author': author,
+                    'smart_assigned': assigned_group_id is not None
+                })
+                break  # Only match one rule per item
+
+    return jsonify({'success': True, 'matches': matches, 'count': len(matches)})
+
+
+# ============== SMART ASSIGNMENTS ==============
+
+@app.route('/api/abs/assign/author', methods=['POST'])
+def api_abs_assign_author():
+    """Assign an author to a user group for smart rules."""
+    data = request.get_json() or {}
+    author = data.get('author', '').strip()
+    group_id = data.get('group_id', '').strip()
+
+    if not author or not group_id:
+        return jsonify({'success': False, 'error': 'Author and group_id required'})
+
+    groups = load_groups()
+    groups['author_assignments'][author] = group_id
+    save_groups(groups)
+    return jsonify({'success': True, 'message': f'Assigned "{author}" to group'})
+
+
+@app.route('/api/abs/assign/author/<author>', methods=['DELETE'])
+def api_abs_unassign_author(author):
+    """Remove author assignment."""
+    groups = load_groups()
+    if author in groups.get('author_assignments', {}):
+        del groups['author_assignments'][author]
+        save_groups(groups)
+    return jsonify({'success': True})
+
+
+@app.route('/api/abs/assign/genre', methods=['POST'])
+def api_abs_assign_genre():
+    """Assign a genre to a user group for smart rules."""
+    data = request.get_json() or {}
+    genre = data.get('genre', '').strip()
+    group_id = data.get('group_id', '').strip()
+
+    if not genre or not group_id:
+        return jsonify({'success': False, 'error': 'Genre and group_id required'})
+
+    groups = load_groups()
+    groups['genre_assignments'][genre] = group_id
+    save_groups(groups)
+    return jsonify({'success': True, 'message': f'Assigned genre "{genre}" to group'})
+
+
+@app.route('/api/abs/assign/genre/<genre>', methods=['DELETE'])
+def api_abs_unassign_genre(genre):
+    """Remove genre assignment."""
+    groups = load_groups()
+    if genre in groups.get('genre_assignments', {}):
+        del groups['genre_assignments'][genre]
+        save_groups(groups)
+    return jsonify({'success': True})
+
+
+# ============== KEEP FOREVER / EXCLUDE ==============
+
+@app.route('/api/abs/keep', methods=['POST'])
+def api_abs_keep_forever():
+    """Add item/author/series to keep forever list."""
+    data = request.get_json() or {}
+    item_type = data.get('type')  # 'item', 'author', 'series'
+    value = data.get('value', '').strip()
+
+    if not item_type or not value:
+        return jsonify({'success': False, 'error': 'Type and value required'})
+
+    groups = load_groups()
+    keep = groups.get('keep_forever', {'items': [], 'authors': [], 'series': []})
+
+    if item_type == 'item' and value not in keep['items']:
+        keep['items'].append(value)
+    elif item_type == 'author' and value not in keep['authors']:
+        keep['authors'].append(value)
+    elif item_type == 'series' and value not in keep['series']:
+        keep['series'].append(value)
+
+    groups['keep_forever'] = keep
+    save_groups(groups)
+    return jsonify({'success': True, 'message': f'Added to keep forever: {value}'})
+
+
+@app.route('/api/abs/keep', methods=['DELETE'])
+def api_abs_remove_keep():
+    """Remove from keep forever list."""
+    data = request.get_json() or {}
+    item_type = data.get('type')
+    value = data.get('value', '').strip()
+
+    groups = load_groups()
+    keep = groups.get('keep_forever', {'items': [], 'authors': [], 'series': []})
+
+    if item_type == 'item' and value in keep['items']:
+        keep['items'].remove(value)
+    elif item_type == 'author' and value in keep['authors']:
+        keep['authors'].remove(value)
+    elif item_type == 'series' and value in keep['series']:
+        keep['series'].remove(value)
+
+    groups['keep_forever'] = keep
+    save_groups(groups)
+    return jsonify({'success': True})
+
+
+@app.route('/api/abs/exclude', methods=['POST'])
+def api_abs_exclude():
+    """Add author/genre to exclude from auto-rules."""
+    data = request.get_json() or {}
+    item_type = data.get('type')  # 'author', 'genre'
+    value = data.get('value', '').strip()
+
+    if not item_type or not value:
+        return jsonify({'success': False, 'error': 'Type and value required'})
+
+    groups = load_groups()
+    exclude = groups.get('exclude_from_rules', {'authors': [], 'genres': []})
+
+    if item_type == 'author' and value not in exclude['authors']:
+        exclude['authors'].append(value)
+    elif item_type == 'genre' and value not in exclude['genres']:
+        exclude['genres'].append(value)
+
+    groups['exclude_from_rules'] = exclude
+    save_groups(groups)
+    return jsonify({'success': True, 'message': f'Excluded from rules: {value}'})
+
+
+@app.route('/api/abs/exclude', methods=['DELETE'])
+def api_abs_remove_exclude():
+    """Remove from exclude list."""
+    data = request.get_json() or {}
+    item_type = data.get('type')
+    value = data.get('value', '').strip()
+
+    groups = load_groups()
+    exclude = groups.get('exclude_from_rules', {'authors': [], 'genres': []})
+
+    if item_type == 'author' and value in exclude['authors']:
+        exclude['authors'].remove(value)
+    elif item_type == 'genre' and value in exclude['genres']:
+        exclude['genres'].remove(value)
+
+    groups['exclude_from_rules'] = exclude
+    save_groups(groups)
+    return jsonify({'success': True})
+
+
+# ============== MANUAL BOOK MATCHING ==============
+
+BOOKBUCKET_URL = "http://localhost:8642"
+BOOKBUCKET_API_KEY = "Ff2PbA_jVaR7zHlJ3ehsTumf77jPccaDY0ipq3-NHQ4"
+
+@app.route('/api/search_bookdb')
+def api_search_bookdb():
+    """Search BookBucket for books/series to manually match."""
+    query = request.args.get('q', '').strip()
+    search_type = request.args.get('type', 'books')  # 'books' or 'series'
+    author = request.args.get('author', '').strip()
+    limit = min(int(request.args.get('limit', 20)), 50)
+
+    if not query or len(query) < 2:
+        return jsonify({'error': 'Query must be at least 2 characters', 'results': []})
+
+    try:
+        params = {'q': query, 'limit': limit}
+        if author:
+            params['author'] = author
+
+        endpoint = f"{BOOKBUCKET_URL}/search/{search_type}"
+        resp = requests.get(
+            endpoint,
+            params=params,
+            headers={"X-API-Key": BOOKBUCKET_API_KEY},
+            timeout=10
+        )
+
+        if resp.status_code != 200:
+            return jsonify({'error': f'BookBucket API error: {resp.status_code}', 'results': []})
+
+        results = resp.json()
+        return jsonify({'results': results, 'count': len(results)})
+
+    except requests.exceptions.ConnectionError:
+        return jsonify({'error': 'BookBucket API not available', 'results': []})
+    except Exception as e:
+        logger.error(f"BookBucket search error: {e}")
+        return jsonify({'error': str(e), 'results': []})
+
+
+@app.route('/api/manual_match', methods=['POST'])
+def api_manual_match():
+    """
+    Save a manual match for a book in the queue.
+    Accepts custom author/title OR a selected BookBucket result.
+    """
+    data = request.get_json() or {}
+    queue_id = data.get('queue_id')
+
+    # Manual entry fields
+    new_author = data.get('author', '').strip()
+    new_title = data.get('title', '').strip()
+
+    # Or BookBucket selection
+    bookdb_result = data.get('bookdb_result')  # Full result object from search
+
+    if not queue_id:
+        return jsonify({'success': False, 'error': 'queue_id required'})
+
+    conn = get_local_db()
+    c = conn.cursor()
+
+    # Get the queue item
+    c.execute('SELECT * FROM processing_queue WHERE id = ?', (queue_id,))
+    item = c.fetchone()
+    if not item:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Queue item not found'})
+
+    item = dict(item)
+    old_path = item['folder_path']
+    old_author = item['current_author']
+    old_title = item['current_title']
+
+    # Determine new values
+    if bookdb_result:
+        new_author = bookdb_result.get('author_name') or new_author
+        new_title = bookdb_result.get('title') or new_title
+        # Include series info if available
+        series_name = bookdb_result.get('series_name')
+        series_pos = bookdb_result.get('series_position')
+        if series_name and series_pos:
+            new_title = f"{new_title} ({series_name} #{int(series_pos) if series_pos == int(series_pos) else series_pos})"
+
+    if not new_author or not new_title:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Author and title required'})
+
+    # Build new path
+    config = load_config()
+    library_paths = config.get('library_paths', [])
+
+    # Find which library this book is in
+    library_root = None
+    for lib_path in library_paths:
+        if old_path.startswith(lib_path):
+            library_root = lib_path
+            break
+
+    if not library_root:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Could not determine library root'})
+
+    # New path: Library/Author/Title
+    new_path = os.path.join(library_root, new_author, new_title)
+
+    # Check if it would overwrite something
+    if os.path.exists(new_path) and new_path != old_path:
+        conn.close()
+        return jsonify({'success': False, 'error': f'Path already exists: {new_path}'})
+
+    # Record as pending fix (don't rename immediately - user can review)
+    c.execute('''
+        INSERT INTO fix_history (folder_path, old_path, new_path, old_author, new_author,
+                                old_title, new_title, status, source, fixed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 'manual', datetime('now'))
+    ''', (old_path, old_path, new_path, old_author, new_author, old_title, new_title))
+
+    # Remove from queue
+    c.execute('DELETE FROM processing_queue WHERE id = ?', (queue_id,))
+
+    conn.commit()
+    conn.close()
+
+    return jsonify({
+        'success': True,
+        'message': f'Saved pending fix: {old_author}/{old_title} → {new_author}/{new_title}',
+        'old_path': old_path,
+        'new_path': new_path
+    })
+
+
+# ============== BACKUP & RESTORE ==============
+
+import zipfile
+import io
+from datetime import datetime
+
+BACKUP_FILES = ['config.json', 'secrets.json', 'library.db', 'user_groups.json']
+
+@app.route('/api/backup')
+def api_backup():
+    """Download a backup of all settings and database."""
+    try:
+        # Create in-memory zip
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for filename in BACKUP_FILES:
+                filepath = BASE_DIR / filename
+                if filepath.exists():
+                    zf.write(filepath, filename)
+                    logger.info(f"Backup: Added {filename}")
+
+            # Add metadata
+            metadata = {
+                'backup_date': datetime.now().isoformat(),
+                'version': APP_VERSION,
+                'files': [f for f in BACKUP_FILES if (BASE_DIR / f).exists()]
+            }
+            zf.writestr('backup_metadata.json', json.dumps(metadata, indent=2))
+
+        zip_buffer.seek(0)
+
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f'library_manager_backup_{timestamp}.zip'
+
+        return send_file(
+            zip_buffer,
+            mimetype='application/zip',
+            as_attachment=True,
+            download_name=filename
+        )
+
+    except Exception as e:
+        logger.error(f"Backup failed: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/restore', methods=['POST'])
+def api_restore():
+    """Restore settings and database from a backup zip."""
+    if 'backup' not in request.files:
+        return jsonify({'success': False, 'error': 'No backup file provided'})
+
+    backup_file = request.files['backup']
+    if not backup_file.filename.endswith('.zip'):
+        return jsonify({'success': False, 'error': 'Backup must be a .zip file'})
+
+    try:
+        # Create a timestamped backup of current state first
+        current_backup_dir = BASE_DIR / 'backups' / f'pre_restore_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
+        current_backup_dir.mkdir(parents=True, exist_ok=True)
+
+        for filename in BACKUP_FILES:
+            filepath = BASE_DIR / filename
+            if filepath.exists():
+                import shutil
+                shutil.copy2(filepath, current_backup_dir / filename)
+
+        # Extract the uploaded backup
+        restored = []
+        skipped = []
+
+        with zipfile.ZipFile(backup_file, 'r') as zf:
+            # Check for metadata
+            if 'backup_metadata.json' in zf.namelist():
+                meta = json.loads(zf.read('backup_metadata.json'))
+                logger.info(f"Restoring backup from {meta.get('backup_date', 'unknown')}")
+
+            for filename in BACKUP_FILES:
+                if filename in zf.namelist():
+                    # Extract to app directory
+                    target_path = BASE_DIR / filename
+                    with zf.open(filename) as src:
+                        with open(target_path, 'wb') as dst:
+                            dst.write(src.read())
+                    restored.append(filename)
+                    logger.info(f"Restored: {filename}")
+                else:
+                    skipped.append(filename)
+
+        return jsonify({
+            'success': True,
+            'message': f'Restored {len(restored)} files. Please restart the app to apply changes.',
+            'restored': restored,
+            'skipped': skipped,
+            'pre_restore_backup': str(current_backup_dir)
+        })
+
+    except zipfile.BadZipFile:
+        return jsonify({'success': False, 'error': 'Invalid zip file'})
+    except Exception as e:
+        logger.error(f"Restore failed: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/backup/info')
+def api_backup_info():
+    """Get info about what would be backed up."""
+    files_info = []
+    total_size = 0
+
+    for filename in BACKUP_FILES:
+        filepath = BASE_DIR / filename
+        if filepath.exists():
+            size = filepath.stat().st_size
+            total_size += size
+            files_info.append({
+                'name': filename,
+                'size': size,
+                'size_human': f'{size / 1024:.1f} KB' if size > 1024 else f'{size} bytes',
+                'modified': datetime.fromtimestamp(filepath.stat().st_mtime).isoformat()
+            })
+
+    return jsonify({
+        'files': files_info,
+        'total_size': total_size,
+        'total_size_human': f'{total_size / 1024:.1f} KB' if total_size > 1024 else f'{total_size} bytes'
+    })
 
 
 # ============== MAIN ==============

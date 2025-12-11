@@ -2,6 +2,35 @@
 
 All notable changes to Library Manager will be documented in this file.
 
+## [0.9.0-beta.13] - 2025-12-11
+
+### Added
+- **Custom naming templates** - Build your own folder naming convention
+  - Clickable tag builder UI in Settings → General
+  - Tags: `{author}`, `{title}`, `{series}`, `{series_num}`, `{narrator}`, `{year}`, `{edition}`, `{variant}`
+  - Live preview shows how your template will look
+  - Missing data automatically cleaned up (empty brackets removed)
+  - Example: `{author}/{series}/{series_num} - {title}` → `Brandon Sanderson/Mistborn/1 - The Final Empire/`
+- **Manual book matching** - Search and match books manually when AI can't find them
+  - Edit button on queue items
+  - Search our 49M+ book database directly
+  - Select correct book from results to auto-fill author/title/series
+  - Goes to Pending for review before applying
+- **Backup & restore** - Protect your configuration
+  - Download backup creates .zip with all settings, groups, and database
+  - Restore backup uploads previous backup to restore setup
+  - Current state backed up before restore for safety
+  - Found in Settings → Advanced
+- **Version-aware renaming** - Different narrators and editions get their own folders
+  - Narrator in curly braces: `{Ray Porter}` vs `{Clive Barker}`
+  - Edition in brackets: `[30th Anniversary Edition]`
+  - Variant in brackets: `[Graphic Audio]`
+  - Smart conflict resolution tries narrator → variant → edition → year
+
+### Changed
+- Settings now saves custom naming template
+- `build_new_path()` supports custom template parsing
+
 ## [0.9.0-beta.11] - 2025-12-10
 
 ### Added

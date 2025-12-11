@@ -66,6 +66,9 @@
                     <td><small class="badge bg-danger text-wrap" style="max-width: 200px;">{{ (item.reason or 'Unknown')[:50] }}{% if item.reason and item.reason|length > 50 %}...{% endif %}</small></td>
                     <td><small>{{ item.added_at[5:16] if item.added_at else '?' }}</small></td>
                     <td>
+                        <button class="btn btn-sm btn-outline-primary me-1" onclick="editItem({{ item.id }}, '{{ item.current_author | e }}', '{{ item.current_title | e }}')" title="Edit">
+                            <i class="bi bi-pencil"></i>
+                        </button>
                         <button class="btn btn-sm btn-outline-secondary" onclick="removeFromQueue({{ item.id }})" title="Mark as OK">
                             <i class="bi bi-check"></i>
                         </button>
@@ -93,6 +96,66 @@
     </div>
 </div>
 {% endif %}
+</div>
+
+<!-- Edit Modal -->
+<div class="modal fade" id="editModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content bg-dark">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-pencil"></i> Edit Book Metadata</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="edit-queue-id">
+
+                <!-- Manual Entry -->
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Author</label>
+                        <input type="text" class="form-control bg-dark text-light" id="edit-author" placeholder="Author Name">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Title</label>
+                        <input type="text" class="form-control bg-dark text-light" id="edit-title" placeholder="Book Title">
+                    </div>
+                </div>
+
+                <hr class="text-muted">
+
+                <!-- Search BookBucket -->
+                <div class="mb-3">
+                    <label class="form-label"><i class="bi bi-search"></i> Search BookBucket Database</label>
+                    <div class="input-group">
+                        <input type="text" class="form-control bg-dark text-light" id="search-query" placeholder="Search by title or author...">
+                        <button class="btn btn-outline-info" type="button" onclick="searchBookDB()">
+                            <i class="bi bi-search"></i> Search
+                        </button>
+                    </div>
+                    <small class="text-muted">Search our 49M+ book database to find the correct match</small>
+                </div>
+
+                <!-- Search Results -->
+                <div id="search-results" class="mb-3" style="max-height: 300px; overflow-y: auto; display: none;">
+                    <div class="list-group" id="search-results-list">
+                        <!-- Results inserted here -->
+                    </div>
+                </div>
+
+                <!-- Selected Match -->
+                <div id="selected-match" class="alert alert-success d-none">
+                    <strong>Selected:</strong> <span id="selected-match-text"></span>
+                    <button type="button" class="btn-close float-end" onclick="clearSelection()"></button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="saveManualMatch()">
+                    <i class="bi bi-check-lg"></i> Save as Pending Fix
+                </button>
+            </div>
+        </div>
+    </div>
 </div>
 {% endblock %}
 
@@ -225,14 +288,19 @@ function refreshQueue() {
                 data.items.forEach(item => {
                     const tr = document.createElement('tr');
                     tr.id = `queue-${item.id}`;
+                    const authorEsc = escapeHtml(item.current_author);
+                    const titleEsc = escapeHtml(item.current_title);
                     tr.innerHTML = `
-                        <td><span class="text-warning">${item.current_author}</span></td>
-                        <td>${item.current_title}</td>
-                        <td><span class="badge bg-danger">${item.reason}</span></td>
+                        <td><span class="text-warning">${authorEsc}</span></td>
+                        <td>${titleEsc}</td>
+                        <td><span class="badge bg-danger">${escapeHtml(item.reason)}</span></td>
                         <td><small>${item.added_at ? item.added_at.substring(0,16) : 'Unknown'}</small></td>
                         <td>
+                            <button class="btn btn-sm btn-outline-primary me-1" onclick="editItem(${item.id}, '${authorEsc.replace(/'/g, "\\'")}', '${titleEsc.replace(/'/g, "\\'")}')" title="Edit">
+                                <i class="bi bi-pencil"></i>
+                            </button>
                             <button class="btn btn-sm btn-outline-secondary" onclick="removeFromQueue(${item.id})" title="Mark as OK">
-                                <i class="bi bi-check"></i> OK
+                                <i class="bi bi-check"></i>
                             </button>
                         </td>
                     `;
@@ -258,5 +326,162 @@ function removeFromQueue(queueId) {
 // Auto-refresh every 10 seconds
 setInterval(refreshQueue, 10000);
 log('Queue page loaded. Auto-refresh every 10s.');
+
+// ===== EDIT FUNCTIONS =====
+let selectedBookDBResult = null;
+let editModal = null;
+
+function editItem(queueId, author, title) {
+    document.getElementById('edit-queue-id').value = queueId;
+    document.getElementById('edit-author').value = author;
+    document.getElementById('edit-title').value = title;
+    document.getElementById('search-query').value = title;  // Pre-fill search with title
+    document.getElementById('search-results').style.display = 'none';
+    document.getElementById('selected-match').classList.add('d-none');
+    selectedBookDBResult = null;
+
+    if (!editModal) {
+        editModal = new bootstrap.Modal(document.getElementById('editModal'));
+    }
+    editModal.show();
+    log(`Editing item ${queueId}: ${author} - ${title}`);
+}
+
+function searchBookDB() {
+    const query = document.getElementById('search-query').value.trim();
+    if (query.length < 2) {
+        alert('Search query must be at least 2 characters');
+        return;
+    }
+
+    const resultsDiv = document.getElementById('search-results');
+    const resultsList = document.getElementById('search-results-list');
+    resultsList.innerHTML = '<div class="list-group-item bg-dark text-muted">Searching...</div>';
+    resultsDiv.style.display = 'block';
+
+    fetch(`/api/search_bookdb?q=${encodeURIComponent(query)}&limit=20`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) {
+                resultsList.innerHTML = `<div class="list-group-item bg-dark text-danger">${data.error}</div>`;
+                return;
+            }
+
+            if (!data.results || data.results.length === 0) {
+                resultsList.innerHTML = '<div class="list-group-item bg-dark text-muted">No results found</div>';
+                return;
+            }
+
+            resultsList.innerHTML = data.results.map((book, idx) => {
+                const author = book.author_name || 'Unknown Author';
+                const title = book.title || 'Unknown Title';
+                const series = book.series_name ? ` (${book.series_name}${book.series_position ? ' #' + book.series_position : ''})` : '';
+                const year = book.year_published ? ` [${book.year_published}]` : '';
+
+                return `
+                    <a href="#" class="list-group-item list-group-item-action bg-dark text-light"
+                       onclick="selectResult(${idx}); return false;">
+                        <div class="d-flex justify-content-between">
+                            <span><strong>${escapeHtml(title)}</strong>${series}</span>
+                            <small class="text-muted">${year}</small>
+                        </div>
+                        <small class="text-info">${escapeHtml(author)}</small>
+                    </a>
+                `;
+            }).join('');
+
+            // Store results for selection
+            window._searchResults = data.results;
+            log(`Found ${data.results.length} results for "${query}"`);
+        })
+        .catch(e => {
+            resultsList.innerHTML = `<div class="list-group-item bg-dark text-danger">Error: ${e}</div>`;
+            log('Search error: ' + e);
+        });
+}
+
+function selectResult(idx) {
+    const book = window._searchResults[idx];
+    if (!book) return;
+
+    selectedBookDBResult = book;
+
+    // Fill in the form fields
+    if (book.author_name) {
+        document.getElementById('edit-author').value = book.author_name;
+    }
+    if (book.title) {
+        document.getElementById('edit-title').value = book.title;
+    }
+
+    // Show selected match
+    const matchDiv = document.getElementById('selected-match');
+    const matchText = document.getElementById('selected-match-text');
+    const series = book.series_name ? ` (${book.series_name}${book.series_position ? ' #' + book.series_position : ''})` : '';
+    matchText.textContent = `${book.author_name || 'Unknown'} - ${book.title}${series}`;
+    matchDiv.classList.remove('d-none');
+
+    // Hide search results
+    document.getElementById('search-results').style.display = 'none';
+
+    log(`Selected: ${book.author_name} - ${book.title}`);
+}
+
+function clearSelection() {
+    selectedBookDBResult = null;
+    document.getElementById('selected-match').classList.add('d-none');
+}
+
+function saveManualMatch() {
+    const queueId = document.getElementById('edit-queue-id').value;
+    const author = document.getElementById('edit-author').value.trim();
+    const title = document.getElementById('edit-title').value.trim();
+
+    if (!author || !title) {
+        alert('Author and title are required');
+        return;
+    }
+
+    const payload = {
+        queue_id: parseInt(queueId),
+        author: author,
+        title: title
+    };
+
+    // Include BookDB result if one was selected
+    if (selectedBookDBResult) {
+        payload.bookdb_result = selectedBookDBResult;
+    }
+
+    fetch('/api/manual_match', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            log(`Saved: ${data.message}`);
+            editModal.hide();
+            document.getElementById(`queue-${queueId}`).remove();
+            refreshQueue();
+            alert('Saved as pending fix! Go to History > Pending to apply it.');
+        } else {
+            alert('Error: ' + (data.error || 'Unknown error'));
+            log('Save error: ' + data.error);
+        }
+    })
+    .catch(e => {
+        alert('Error: ' + e);
+        log('Save error: ' + e);
+    });
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
 </script>
 {% endblock %}

@@ -192,6 +192,57 @@ Choose the folder structure that matches your player:
 |--------|---------|-----------------|
 | `Author/Title` | `Brandon Sanderson/Mistborn/` | Audiobookshelf, Plex, Jellyfin |
 | `Author - Title` | `Brandon Sanderson - Mistborn/` | Booksonic, basic players |
+| **Custom Template** | Build your own! | Any player |
+
+### Custom Naming Templates
+
+Build your own naming convention with clickable tags:
+
+**Available tags:**
+- `{author}` - Author name
+- `{title}` - Book title
+- `{series}` - Series name (if available)
+- `{series_num}` - Series position (1, 2, 3...)
+- `{narrator}` - Narrator name (if available)
+- `{year}` - Publication year
+- `{edition}` - Edition info (e.g., "30th Anniversary")
+- `{variant}` - Format variant (e.g., "Graphic Audio")
+
+**Example templates:**
+```
+{author}/{title}                           → Brandon Sanderson/The Final Empire/
+{author}/{series}/{series_num} - {title}   → Brandon Sanderson/Mistborn/1 - The Final Empire/
+{author} - {title} ({narrator})            → Brandon Sanderson - The Final Empire (Michael Kramer)/
+{author}/{title} [{edition}]               → Brandon Sanderson/The Final Empire [First Edition]/
+```
+
+Missing data is automatically cleaned up - if a book has no narrator, `({narrator})` becomes empty and is removed.
+
+### Manual Book Matching
+
+Can't find the right metadata automatically? Use manual matching:
+- Click the **edit (pencil) button** on any queue item
+- Search our **49M+ book database** directly
+- Select the correct book from results
+- Auto-fills author, title, and series info
+- Review in Pending before applying
+
+### Backup & Restore
+
+Protect your configuration with built-in backup:
+- **Download backup** - Creates a .zip with all settings, groups, and database
+- **Restore backup** - Upload a previous backup to restore your setup
+- Your current state is backed up before restore (just in case)
+- Found in **Settings → Advanced**
+
+### Version-Aware Renaming
+
+Different narrators and editions get their own folders:
+- `The Hellbound Heart {Ray Porter}/` vs `The Hellbound Heart {Clive Barker}/`
+- `Dune [30th Anniversary Edition]/` vs `Dune/`
+- `The Way of Kings [Graphic Audio]/`
+
+Smart conflict resolution tries narrator, variant, edition, then year to keep versions separate.
 
 ### AI Providers
 
@@ -295,7 +346,8 @@ See [docs/DOCKER.md](docs/DOCKER.md) for detailed platform-specific instructions
 | Option | Default | Description |
 |--------|---------|-------------|
 | `library_paths` | `[]` | Folders to scan (one per line) |
-| `naming_format` | `author/title` | How to structure renamed folders |
+| `naming_format` | `author/title` | How to structure renamed folders (`author/title`, `author - title`, or `custom`) |
+| `custom_naming_template` | `{author}/{title}` | Custom template with tags (when naming_format is `custom`) |
 | `series_grouping` | `false` | Enable Audiobookshelf-style series folders |
 | `auto_fix` | `false` | Apply fixes automatically vs manual approval |
 | `protect_author_changes` | `true` | Extra verification for drastic changes |

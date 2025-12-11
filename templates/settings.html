@@ -70,14 +70,107 @@
                             </div>
                             <div class="mb-2">
                                 <label class="form-label">Folder Naming Format</label>
-                                <select class="form-select bg-dark text-light" name="naming_format">
-                                    <option value="author/title" {% if config.naming_format == 'author/title' or not config.naming_format %}selected{% endif %}>
+                                <select class="form-select bg-dark text-light" name="naming_format" id="naming_format" onchange="toggleCustomNaming()">
+                                    <option value="author/title" {% if config.naming_format == 'author/title' or (not config.naming_format and not config.custom_naming_template) %}selected{% endif %}>
                                         Author/Title - Audiobookshelf, Plex, Jellyfin
                                     </option>
                                     <option value="author - title" {% if config.naming_format == 'author - title' %}selected{% endif %}>
                                         Author - Title (flat) - Booksonic, basic players
                                     </option>
+                                    <option value="custom" {% if config.naming_format == 'custom' %}selected{% endif %}>
+                                        Custom Template - Build your own
+                                    </option>
                                 </select>
+                            </div>
+
+                            <!-- Custom Naming Template Builder -->
+                            <div id="custom-naming-builder" class="mt-3" style="display: none;">
+                                <label class="form-label">Custom Naming Template</label>
+                                <div class="input-group mb-2">
+                                    <input type="text" class="form-control bg-dark text-light font-monospace"
+                                           name="custom_naming_template" id="custom_naming_template"
+                                           value="{{ config.custom_naming_template or '{author}/{title}' }}"
+                                           placeholder="{author}/{title}"
+                                           oninput="updateNamingPreview()">
+                                    <button type="button" class="btn btn-outline-secondary" onclick="clearNamingTemplate()">
+                                        <i class="bi bi-x-lg"></i>
+                                    </button>
+                                </div>
+
+                                <div class="mb-2">
+                                    <small class="text-muted d-block mb-1">Click tags to add them:</small>
+                                    <div class="d-flex flex-wrap gap-1">
+                                        <button type="button" class="btn btn-sm btn-outline-info naming-tag" onclick="insertTag('{author}')">
+                                            {author}
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-outline-info naming-tag" onclick="insertTag('{title}')">
+                                            {title}
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-outline-warning naming-tag" onclick="insertTag('{series}')">
+                                            {series}
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-outline-warning naming-tag" onclick="insertTag('{series_num}')">
+                                            {series_num}
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-outline-success naming-tag" onclick="insertTag('{narrator}')">
+                                            {narrator}
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary naming-tag" onclick="insertTag('{year}')">
+                                            {year}
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary naming-tag" onclick="insertTag('{edition}')">
+                                            {edition}
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary naming-tag" onclick="insertTag('{variant}')">
+                                            {variant}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="mb-2">
+                                    <small class="text-muted d-block mb-1">Quick separators:</small>
+                                    <div class="d-flex flex-wrap gap-1">
+                                        <button type="button" class="btn btn-sm btn-outline-light" onclick="insertTag('/')">
+                                            /
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-outline-light" onclick="insertTag(' - ')">
+                                            -
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-outline-light" onclick="insertTag(' ')">
+                                            space
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-outline-light" onclick="insertTag('(')">
+                                            (
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-outline-light" onclick="insertTag(')')">
+                                            )
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-outline-light" onclick="insertTag('[')">
+                                            [
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-outline-light" onclick="insertTag(']')">
+                                            ]
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-outline-light" onclick="insertTag('{')">
+                                            {
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-outline-light" onclick="insertTag('}')">
+                                            }
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="alert alert-dark small py-2 mb-0" id="naming-preview">
+                                    <strong>Preview:</strong> <code id="preview-output">Brandon Sanderson/The Final Empire</code>
+                                </div>
+
+                                <div class="mt-2">
+                                    <small class="text-muted">
+                                        <i class="bi bi-info-circle"></i>
+                                        Tags in <span class="text-warning">yellow</span> require series info.
+                                        Missing data will be omitted. Use <code>/</code> for folder separation.
+                                    </small>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -118,7 +211,9 @@
                                        {% if config.series_grouping %}checked{% endif %}>
                                 <label class="form-check-label" for="series_grouping">
                                     <strong>Series Grouping</strong>
+                                    <span class="badge bg-info">BETA</span>
                                     <br><small class="text-muted">Group series books: <code>Author/Series/1 - Title</code></small>
+                                    <br><small class="text-warning">Work in progress - brave testers welcome! Please report issues.</small>
                                 </label>
                             </div>
                         </div>
@@ -318,6 +413,29 @@
                 </div>
 
                 <div class="col-lg-6">
+                    <!-- Backup & Restore -->
+                    <div class="card mb-3 border-info">
+                        <div class="card-header py-2 text-info">
+                            <i class="bi bi-cloud-arrow-down"></i> Backup & Restore
+                        </div>
+                        <div class="card-body">
+                            <p class="text-muted small mb-3">Backup your settings, groups, and database. Restore on a new installation or after a reset.</p>
+
+                            <div class="d-flex gap-2 flex-wrap mb-3">
+                                <a href="/api/backup" class="btn btn-sm btn-outline-info" id="backup-btn">
+                                    <i class="bi bi-download"></i> Download Backup
+                                </a>
+                                <button type="button" class="btn btn-sm btn-outline-warning" onclick="showRestoreModal()">
+                                    <i class="bi bi-upload"></i> Restore Backup
+                                </button>
+                            </div>
+
+                            <div id="backup-info" class="small text-muted">
+                                <i class="bi bi-hourglass-split"></i> Loading backup info...
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Recent Logs -->
                     <div class="card mb-3">
                         <div class="card-header py-2">
@@ -344,6 +462,39 @@
         </div>
     </div>
 </form>
+
+<!-- Restore Modal -->
+<div class="modal fade" id="restoreModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content bg-dark">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-upload"></i> Restore Backup</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-warning small">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <strong>Warning:</strong> Restoring will overwrite your current settings, groups, and database.
+                    A backup of your current state will be saved first.
+                </div>
+
+                <form id="restore-form" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label class="form-label">Select Backup File</label>
+                        <input type="file" class="form-control bg-dark text-light" name="backup" accept=".zip" required>
+                        <small class="text-muted">Upload a .zip backup file created by this app</small>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-warning" onclick="restoreBackup()">
+                    <i class="bi bi-upload"></i> Restore
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -356,8 +507,71 @@ function toggleProviderFields() {
 
 document.addEventListener('DOMContentLoaded', function() {
     toggleProviderFields();
+    toggleCustomNaming();
+    updateNamingPreview();
     refreshLogs();
 });
+
+// Custom Naming Template Builder
+const sampleData = {
+    author: 'Brandon Sanderson',
+    title: 'The Final Empire',
+    series: 'Mistborn',
+    series_num: '1',
+    narrator: 'Michael Kramer',
+    year: '2006',
+    edition: 'First Edition',
+    variant: ''
+};
+
+function toggleCustomNaming() {
+    const format = document.getElementById('naming_format').value;
+    const builder = document.getElementById('custom-naming-builder');
+    if (builder) {
+        builder.style.display = format === 'custom' ? 'block' : 'none';
+        if (format === 'custom') {
+            updateNamingPreview();
+        }
+    }
+}
+
+function insertTag(tag) {
+    const input = document.getElementById('custom_naming_template');
+    const start = input.selectionStart;
+    const end = input.selectionEnd;
+    const text = input.value;
+    input.value = text.substring(0, start) + tag + text.substring(end);
+    input.focus();
+    input.setSelectionRange(start + tag.length, start + tag.length);
+    updateNamingPreview();
+}
+
+function clearNamingTemplate() {
+    document.getElementById('custom_naming_template').value = '';
+    updateNamingPreview();
+}
+
+function updateNamingPreview() {
+    const template = document.getElementById('custom_naming_template').value || '{author}/{title}';
+    let preview = template;
+
+    // Replace tags with sample data
+    Object.keys(sampleData).forEach(key => {
+        const regex = new RegExp(`\\{${key}\\}`, 'g');
+        preview = preview.replace(regex, sampleData[key] || '');
+    });
+
+    // Clean up empty brackets/parens from missing optional data
+    preview = preview.replace(/\(\s*\)/g, '');
+    preview = preview.replace(/\[\s*\]/g, '');
+    preview = preview.replace(/\{\s*\}/g, '');
+    preview = preview.replace(/\s+-\s+(?=-|\/|$)/g, '');
+    preview = preview.replace(/\/+/g, '/');
+    preview = preview.replace(/\s{2,}/g, ' ');
+    preview = preview.trim();
+
+    document.getElementById('preview-output').textContent = preview || '(empty)';
+}
 
 function refreshLogs() {
     fetch('/api/logs').then(r => r.json()).then(data => {
@@ -426,5 +640,77 @@ function copyBugReport() {
 }
 
 setInterval(refreshLogs, 10000);
+
+// Backup & Restore functions
+let restoreModal = null;
+
+function loadBackupInfo() {
+    fetch('/api/backup/info')
+        .then(r => r.json())
+        .then(data => {
+            const el = document.getElementById('backup-info');
+            if (data.files && data.files.length > 0) {
+                let html = `<strong>Backup includes:</strong><ul class="mb-0 ps-3">`;
+                data.files.forEach(f => {
+                    html += `<li>${f.name} (${f.size_human})</li>`;
+                });
+                html += `</ul><div class="mt-1">Total: ${data.total_size_human}</div>`;
+                el.innerHTML = html;
+            } else {
+                el.innerHTML = 'No files to backup';
+            }
+        })
+        .catch(e => {
+            document.getElementById('backup-info').innerHTML = '<span class="text-danger">Error loading info</span>';
+        });
+}
+
+function showRestoreModal() {
+    if (!restoreModal) {
+        restoreModal = new bootstrap.Modal(document.getElementById('restoreModal'));
+    }
+    restoreModal.show();
+}
+
+function restoreBackup() {
+    const form = document.getElementById('restore-form');
+    const fileInput = form.querySelector('input[name="backup"]');
+
+    if (!fileInput.files || fileInput.files.length === 0) {
+        alert('Please select a backup file');
+        return;
+    }
+
+    if (!confirm('Restore from this backup? Your current settings will be backed up first.')) {
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('backup', fileInput.files[0]);
+
+    fetch('/api/restore', {
+        method: 'POST',
+        body: formData
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            alert(data.message + '\n\nRestored: ' + data.restored.join(', '));
+            restoreModal.hide();
+            // Offer to reload
+            if (confirm('Reload page to apply restored settings?')) {
+                location.reload();
+            }
+        } else {
+            alert('Restore failed: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(e => {
+        alert('Restore error: ' + e);
+    });
+}
+
+// Load backup info when Advanced tab is shown
+document.querySelector('[data-bs-target="#tab-advanced"]').addEventListener('shown.bs.tab', loadBackupInfo);
 </script>
 {% endblock %}
