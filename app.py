@@ -1809,6 +1809,41 @@ def deep_scan_library(config):
                         conn.commit()
                         continue
 
+                # Check if this folder contains multiple AUDIO FILES that look like different books
+                # (e.g., "Book 1.m4b", "Book 2.m4b" or "Necroscope Book 1.m4b", "Necroscope Book 2.m4b")
+                audio_files = [f for f in title_dir.iterdir()
+                               if f.is_file() and f.suffix.lower() in AUDIO_EXTENSIONS]
+                if len(audio_files) >= 2:
+                    # Check if filenames indicate different book numbers
+                    book_file_patterns = [
+                        r'book\s*(\d+)',           # "Book 1", "Book 2"
+                        r'#(\d+)',                 # "#1", "#2"
+                        r'^(\d+)\s*[-–—:.]',       # "01 - Title", "02 - Title"
+                        r'[-_\s](\d+)[-_\s.]',     # " 1 ", "_1_", "-1-"
+                        r'volume\s*(\d+)',         # "Volume 1"
+                        r'vol\.?\s*(\d+)',         # "Vol 1", "Vol. 1"
+                    ]
+                    book_numbers_found = set()
+                    for f in audio_files:
+                        for pattern in book_file_patterns:
+                            match = re.search(pattern, f.stem, re.IGNORECASE)
+                            if match:
+                                book_numbers_found.add(match.group(1))
+                                break
+
+                    if len(book_numbers_found) >= 2:
+                        # Multiple different book numbers found - this is a multi-book collection
+                        logger.info(f"Skipping multi-book collection (contains {len(book_numbers_found)} book files): {path}")
+                        c.execute('SELECT id FROM books WHERE path = ?', (path,))
+                        existing = c.fetchone()
+                        if existing:
+                            c.execute('UPDATE books SET status = ? WHERE id = ?', ('multi_book_files', existing['id']))
+                        else:
+                            c.execute('''INSERT INTO books (path, current_author, current_title, status)
+                                         VALUES (?, ?, ?, 'multi_book_files')''', (path, author, title))
+                        conn.commit()
+                        continue
+
                 # Analyze title
                 title_issues = analyze_title(title, author)
                 cleaned_title, clean_issues = clean_title(title)
@@ -1985,6 +2020,48 @@ def process_queue(config, limit=None):
     processed = 0
     fixed = 0
     for row, result in zip(batch, results):
+        # SAFETY CHECK: Before processing, verify this isn't a multi-book collection
+        # that slipped through (items already in queue before detection was added)
+        old_path = Path(row['path'])
+        if old_path.exists() and old_path.is_dir():
+            # Check for multiple book SUBFOLDERS
+            subdirs = [d for d in old_path.iterdir() if d.is_dir()]
+            if len(subdirs) >= 2:
+                book_folder_patterns = [
+                    r'^\d+\s*[-–—:.]?\s*\w', r'^#?\d+\s*[-–—:]',
+                    r'book\s*\d+', r'vol(ume)?\s*\d+', r'part\s*\d+'
+                ]
+                book_like_count = sum(1 for d in subdirs
+                    if any(re.search(p, d.name, re.IGNORECASE) for p in book_folder_patterns))
+                if book_like_count >= 2:
+                    logger.warning(f"BLOCKED: {row['path']} is a series folder ({book_like_count} book subfolders) - skipping")
+                    c.execute('UPDATE books SET status = ? WHERE id = ?', ('series_folder', row['book_id']))
+                    c.execute('DELETE FROM queue WHERE id = ?', (row['queue_id'],))
+                    processed += 1
+                    continue
+
+            # Check for multiple book FILES
+            audio_files = [f for f in old_path.iterdir()
+                           if f.is_file() and f.suffix.lower() in AUDIO_EXTENSIONS]
+            if len(audio_files) >= 2:
+                book_file_patterns = [
+                    r'book\s*(\d+)', r'#(\d+)', r'^(\d+)\s*[-–—:.]',
+                    r'[-_\s](\d+)[-_\s.]', r'volume\s*(\d+)', r'vol\.?\s*(\d+)'
+                ]
+                book_numbers = set()
+                for f in audio_files:
+                    for pattern in book_file_patterns:
+                        match = re.search(pattern, f.stem, re.IGNORECASE)
+                        if match:
+                            book_numbers.add(match.group(1))
+                            break
+                if len(book_numbers) >= 2:
+                    logger.warning(f"BLOCKED: {row['path']} contains {len(book_numbers)} different book files - skipping")
+                    c.execute('UPDATE books SET status = ? WHERE id = ?', ('multi_book_files', row['book_id']))
+                    c.execute('DELETE FROM queue WHERE id = ?', (row['queue_id'],))
+                    processed += 1
+                    continue
+
         new_author = (result.get('author') or '').strip()
         new_title = (result.get('title') or '').strip()
         new_narrator = (result.get('narrator') or '').strip() or None  # None if empty
