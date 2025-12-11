@@ -6,7 +6,7 @@ services:
     container_name: library-manager
     restart: unless-stopped
     ports:
-      - "5060:5060"
+      - "5080:5080"
     volumes:
       # ⚠️  REQUIRED - Your audiobook library
       # The container CANNOT see your files unless you mount them here!
@@ -19,7 +19,7 @@ services:
     environment:
       - TZ=America/Chicago  # Change to your timezone
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5060/"]
+      test: ["CMD", "curl", "-f", "http://localhost:5080/"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -54,7 +54,7 @@ services:
 #
 # 3. Deploy the stack
 #
-# 4. Access the web UI at: http://your-server-ip:5060
+# 4. Access the web UI at: http://your-server-ip:5080
 #
 # 5. In Settings, set your library path to: /audiobooks
 #    (This is the path INSIDE the container, not your host path!)

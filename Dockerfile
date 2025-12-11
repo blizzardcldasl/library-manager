@@ -26,11 +26,11 @@ ENV FLASK_ENV=production
 ENV DATA_DIR=/data
 
 # Expose port
-EXPOSE 5060
+EXPOSE 5080
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:5060/ || exit 1
+    CMD curl -f http://localhost:5080/ || exit 1
 
 # Run the application
 CMD ["python", "app.py"]
