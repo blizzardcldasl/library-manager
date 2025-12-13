@@ -5923,36 +5923,33 @@ def api_abs_remove_exclude():
 # ============== MANUAL BOOK MATCHING ==============
 
 # Use the public BookBucket API - same as metadata pipeline
-# Users need a bookdb_api_key in their config for manual matching features
+# No API key required - the search endpoints are public
 
 @app.route('/api/search_bookdb')
 def api_search_bookdb():
-    """Search BookBucket for books/series to manually match."""
+    """Search BookBucket for books/series to manually match.
+    Uses the public /search endpoint - no API key required.
+    """
     query = request.args.get('q', '').strip()
-    search_type = request.args.get('type', 'books')  # 'books' or 'series'
+    search_type = request.args.get('type', 'all')  # 'books', 'series', or 'all'
     author = request.args.get('author', '').strip()
     limit = min(int(request.args.get('limit', 20)), 50)
 
     if not query or len(query) < 2:
         return jsonify({'error': 'Query must be at least 2 characters', 'results': []})
 
-    config = load_config()
-    api_key = config.get('bookdb_api_key')
-    if not api_key:
-        return jsonify({'error': 'BookDB API key not configured. Add bookdb_api_key to settings.', 'results': []})
-
     try:
         params = {'q': query, 'limit': limit}
         if author:
             params['author'] = author
 
-        endpoint = f"{BOOKDB_API_URL}/search/{search_type}"
-        resp = requests.get(
-            endpoint,
-            params=params,
-            headers={"X-API-Key": api_key},
-            timeout=10
-        )
+        # Use public /search endpoint (no auth required)
+        if search_type == 'all':
+            endpoint = f"{BOOKDB_API_URL}/search"
+        else:
+            endpoint = f"{BOOKDB_API_URL}/search/{search_type}"
+
+        resp = requests.get(endpoint, params=params, timeout=10)
 
         if resp.status_code != 200:
             return jsonify({'error': f'BookBucket API error: {resp.status_code}', 'results': []})
@@ -5961,7 +5958,7 @@ def api_search_bookdb():
         return jsonify({'results': results, 'count': len(results)})
 
     except requests.exceptions.ConnectionError:
-        return jsonify({'error': 'BookBucket API not available', 'results': []})
+        return jsonify({'error': 'BookBucket API not available. The metadata database may be temporarily down for maintenance.', 'results': []})
     except Exception as e:
         logger.error(f"BookBucket search error: {e}")
         return jsonify({'error': str(e), 'results': []})
@@ -5969,16 +5966,11 @@ def api_search_bookdb():
 
 @app.route('/api/bookdb_stats')
 def api_bookdb_stats():
-    """Get BookBucket database statistics (book/author/series counts)."""
-    config = load_config()
-    api_key = config.get('bookdb_api_key')
-
+    """Get BookBucket database statistics (book/author/series counts).
+    Uses public /stats endpoint - no API key required.
+    """
     try:
-        resp = requests.get(
-            f"{BOOKDB_API_URL}/stats",
-            headers={"X-API-Key": api_key} if api_key else {},
-            timeout=5
-        )
+        resp = requests.get(f"{BOOKDB_API_URL}/stats", timeout=5)
         if resp.status_code == 200:
             return jsonify(resp.json())
         return jsonify({'error': f'BookBucket API error: {resp.status_code}'})
@@ -5993,17 +5985,11 @@ def api_book_detail(book_id):
     """
     Get full book details from BookBucket + ABS status.
     Used for hover cards and detail modals.
+    Uses public endpoint - no API key required.
     """
-    config = load_config()
-    api_key = config.get('bookdb_api_key')
-
     try:
         # Fetch full book details from BookBucket
-        resp = requests.get(
-            f"{BOOKDB_API_URL}/book/{book_id}",
-            headers={"X-API-Key": api_key} if api_key else {},
-            timeout=10
-        )
+        resp = requests.get(f"{BOOKDB_API_URL}/book/{book_id}", timeout=10)
 
         if resp.status_code != 200:
             return jsonify({'error': f'Book not found (status {resp.status_code})'})
@@ -6074,16 +6060,10 @@ def api_author_detail(author_id):
     """
     Get author details from BookBucket.
     Used for hover cards on author search results.
+    Uses public endpoint - no API key required.
     """
-    config = load_config()
-    api_key = config.get('bookdb_api_key')
-
     try:
-        resp = requests.get(
-            f"{BOOKDB_API_URL}/author/{author_id}",
-            headers={"X-API-Key": api_key} if api_key else {},
-            timeout=10
-        )
+        resp = requests.get(f"{BOOKDB_API_URL}/author/{author_id}", timeout=10)
 
         if resp.status_code != 200:
             return jsonify({'error': f'Author not found (status {resp.status_code})'})
@@ -6103,16 +6083,10 @@ def api_series_detail(series_id):
     """
     Get series details from BookBucket.
     Used for hover cards on series search results.
+    Uses public endpoint - no API key required.
     """
-    config = load_config()
-    api_key = config.get('bookdb_api_key')
-
     try:
-        resp = requests.get(
-            f"{BOOKDB_API_URL}/series/{series_id}",
-            headers={"X-API-Key": api_key} if api_key else {},
-            timeout=10
-        )
+        resp = requests.get(f"{BOOKDB_API_URL}/series/{series_id}", timeout=10)
 
         if resp.status_code != 200:
             return jsonify({'error': f'Series not found (status {resp.status_code})'})
