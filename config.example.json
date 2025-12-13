@@ -1,7 +1,7 @@
 {
   "library_paths": ["/path/to/your/audiobooks"],
   "ai_provider": "gemini",
-  "gemini_model": "gemini-2.0-flash-exp",
+  "gemini_model": "gemini-2.0-flash",
   "openrouter_model": "google/gemma-3n-e4b-it:free",
   "scan_interval_hours": 6,
   "batch_size": 3,
@@ -11,7 +11,12 @@
   "enabled": true,
   "update_channel": "stable",
   "naming_format": "author/title",
+  "custom_naming_template": "{author}/{title}",
   "series_grouping": true,
+  "ebook_management": false,
+  "ebook_library_mode": "merge",
+  "audio_analysis": false,
+  "abs_url": null,
   "google_books_api_key": null,
   "bookdb_api_key": null
 }
