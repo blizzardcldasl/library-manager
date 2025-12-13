@@ -114,6 +114,7 @@ Matches with less than 30% word overlap are automatically rejected.
 - **History tracking** - See every change that was made
 - **Reject bad suggestions** - Delete wrong AI guesses without applying them
 - **Dismiss errors** - Clear stale error entries when source files no longer exist
+- **System folders ignored** - Won't process `metadata`, `cache`, `streams`, `@eaDir`, etc.
 
 ---
 
@@ -256,6 +257,22 @@ Protect your configuration with built-in backup:
 - **Restore backup** - Upload a previous backup to restore your setup
 - Your current state is backed up before restore (just in case)
 - Found in **Settings → Advanced**
+
+### In-Browser Updates
+
+Update Library Manager without touching the command line:
+- **Check for updates** - Click the version badge (bottom left)
+- **Update Now** - One-click `git pull` from the web UI
+- **Restart App** - Applies changes by restarting the service
+- Works automatically with systemd-managed services
+
+### Loose File Detection
+
+Dropped a file directly in your library? No problem:
+- Detects audio files without proper `Author/Title/` structure
+- Searches our 50M+ book database using the filename
+- Auto-creates the correct folder structure
+- Handles YouTube rips and messy filenames
 
 ### Version-Aware Renaming
 

@@ -39,3 +39,11 @@ metadata_scraper/venv/
 metadata_scraper/*.db
 metadata_scraper/*.log
 metadata_scraper/
+
+# Internal docs - not for public
+PROJECT_BIBLE.md
+metadata_scraper/PROJECT_BIBLE.md
+
+# User screenshots
+static/Screenshot*
+static/Untitled*

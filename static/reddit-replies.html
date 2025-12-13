@@ -215,6 +215,44 @@ What's the folder structure look like for the book that's not showing? And what 
             <button class="copy-btn" onclick="copyReply('reply4', this)">Copy to Clipboard</button>
         </div>
 
+        <div class="reply-card">
+            <h2>Response to invest0rZ - "How to Update" & "4 Issues Not Doing Anything"</h2>
+            <div class="reply-content" id="reply5">Hey! Thanks for reaching out and glad you're finding it useful!
+
+**Regarding the YouTube book not being found:**
+
+In older versions, Library Manager only looked at properly structured folders (<code>Author/Title/audiofile.mp3</code>). If you just dropped a loose file directly in your audiobooks folder, it wouldn't see it.
+
+Good news - I pushed an update that now detects loose files! When you scan, it will find files without the proper folder structure and queue them for auto-organization. It'll search for the book metadata based on the filename and create the proper <code>Author/Title</code> folder structure for you.
+
+**How to Update:**
+
+I just added an "Update Now" button! Here's how:
+
+1. Click on the version number in the bottom left (where it says <code>v0.9.0-beta.13</code>)
+2. If there's an update available, you'll see an "Update Available" badge
+3. Click it and hit <strong>"Update Now"</strong> - it'll pull the latest code automatically
+4. After updating, click <strong>"Restart App"</strong> to apply the changes
+
+If you installed via Docker, you'll need to pull the new image instead:
+<code>docker pull deucebucket/library-manager:latest
+docker-compose down && docker-compose up -d</code>
+
+**Regarding "4 issues found but not doing anything":**
+
+Those 4 issues are informational - they're things the scanner noticed about your library structure (like folders that might need attention). Not all issues are auto-fixable yet.
+
+Looking at your logs, the scan actually completed successfully:
+- Found 60 audio files
+- The queue processed and finished (shows "Queue is now empty")
+- Your 4 issues are likely minor structural things
+
+If you want to see what those issues are, check the Settings page and scroll down to "Recent Logs" - it should show what was flagged.
+
+After you update, try scanning again and let me know if your YouTube book gets picked up properly!</div>
+            <button class="copy-btn" onclick="copyReply('reply5', this)">Copy to Clipboard</button>
+        </div>
+
         <div class="note">
             <h3>Context</h3>
             <p>These replies address concerns about AI-powered file operations in Library Manager. The tool uses metadata matching to suggest file organization improvements, and some users rightfully want to understand the safety measures before trusting it with their libraries.</p>

@@ -347,9 +347,19 @@
                 </div>
                 <div class="modal-footer" style="border-color: #0f3460;">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Later</button>
-                    <a id="release-link" href="#" target="_blank" class="btn btn-success">
+                    <a id="release-link" href="#" target="_blank" class="btn btn-outline-light">
                         <i class="bi bi-github"></i> View Release
                     </a>
+                    <button type="button" class="btn btn-success" onclick="performUpdate()" id="update-now-btn">
+                        <i class="bi bi-download"></i> Update Now
+                    </button>
+                </div>
+                <div id="update-progress" class="p-3" style="display: none; background: rgba(0,0,0,0.3); border-top: 1px solid #0f3460;">
+                    <div class="d-flex align-items-center">
+                        <div class="spinner-border spinner-border-sm text-primary me-2" role="status" id="update-spinner"></div>
+                        <span id="update-progress-text">Updating...</span>
+                    </div>
+                    <pre id="update-output" class="mt-2 mb-0 small" style="max-height: 100px; overflow-y: auto; display: none;"></pre>
                 </div>
             </div>
         </div>
@@ -427,6 +437,82 @@
         // Check for updates silently on page load, then every hour
         setTimeout(() => checkForUpdate(false), 2000);
         setInterval(() => checkForUpdate(false), 3600000);
+
+        function performUpdate() {
+            const btn = document.getElementById('update-now-btn');
+            const progress = document.getElementById('update-progress');
+            const progressText = document.getElementById('update-progress-text');
+            const outputPre = document.getElementById('update-output');
+            const spinner = document.getElementById('update-spinner');
+
+            btn.disabled = true;
+            btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Updating...';
+            progress.style.display = 'block';
+            progressText.textContent = 'Fetching updates from GitHub...';
+
+            fetch('/api/perform_update', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    spinner.style.display = 'none';
+
+                    if (data.success) {
+                        if (data.updated) {
+                            progressText.innerHTML = '<i class="bi bi-check-circle text-success"></i> ' + data.message;
+                            if (data.output) {
+                                outputPre.textContent = data.output;
+                                outputPre.style.display = 'block';
+                            }
+                            // Show restart button
+                            btn.innerHTML = '<i class="bi bi-arrow-clockwise"></i> Restart App';
+                            btn.disabled = false;
+                            btn.onclick = function() { restartApp(); };
+                            btn.classList.remove('btn-success');
+                            btn.classList.add('btn-warning');
+                        } else {
+                            progressText.innerHTML = '<i class="bi bi-check-circle text-success"></i> Already up to date!';
+                            btn.innerHTML = '<i class="bi bi-check"></i> Up to Date';
+                        }
+                    } else {
+                        progressText.innerHTML = '<i class="bi bi-exclamation-triangle text-danger"></i> ' + data.error;
+                        if (data.instructions) {
+                            outputPre.textContent = data.instructions + (data.details ? '\n\n' + data.details : '');
+                            outputPre.style.display = 'block';
+                        }
+                        btn.innerHTML = '<i class="bi bi-x-circle"></i> Failed';
+                        btn.classList.remove('btn-success');
+                        btn.classList.add('btn-danger');
+                    }
+                })
+                .catch(e => {
+                    spinner.style.display = 'none';
+                    progressText.innerHTML = '<i class="bi bi-exclamation-triangle text-danger"></i> Update failed: ' + e;
+                    btn.innerHTML = '<i class="bi bi-x-circle"></i> Failed';
+                    btn.classList.remove('btn-success');
+                    btn.classList.add('btn-danger');
+                });
+        }
+
+        function restartApp() {
+            const progressText = document.getElementById('update-progress-text');
+            progressText.innerHTML = '<div class="spinner-border spinner-border-sm me-2"></div> Restarting...';
+
+            fetch('/api/restart', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        progressText.innerHTML = '<i class="bi bi-check-circle text-success"></i> Restarting... Page will reload in 5 seconds.';
+                        setTimeout(() => { window.location.reload(); }, 5000);
+                    } else {
+                        progressText.innerHTML = '<i class="bi bi-info-circle text-warning"></i> ' + data.error +
+                            (data.instructions ? '<br><small>' + data.instructions + '</small>' : '');
+                    }
+                })
+                .catch(e => {
+                    // Connection may drop during restart - that's expected
+                    progressText.innerHTML = '<i class="bi bi-check-circle text-success"></i> Restarting... Page will reload in 5 seconds.';
+                    setTimeout(() => { window.location.reload(); }, 5000);
+                });
+        }
     </script>
     {% block scripts %}{% endblock %}
 </body>

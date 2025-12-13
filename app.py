@@ -11,7 +11,7 @@ Features:
 - Multi-provider AI (Gemini, OpenRouter, Ollama)
 """
 
-APP_VERSION = "0.9.0-beta.13"
+APP_VERSION = "0.9.0-beta.15"
 GITHUB_REPO = "deucebucket/library-manager"  # Your GitHub repo
 
 # Versioning Guide:
@@ -1978,7 +1978,7 @@ def deep_scan_library(config):
             for loose_file in loose_files:
                 # Parse filename to extract searchable title
                 filename = loose_file.stem  # filename without extension
-                clean_title = clean_search_title(filename)
+                cleaned_filename = clean_search_title(filename)
                 path_str = str(loose_file)
 
                 # Check if already in books table
@@ -1991,7 +1991,7 @@ def deep_scan_library(config):
                     # Create books record for the loose file
                     c.execute('''INSERT INTO books (path, current_author, current_title, status)
                                 VALUES (?, ?, ?, ?)''',
-                             (path_str, 'Unknown', clean_title, 'loose_file'))
+                             (path_str, 'Unknown', cleaned_filename, 'loose_file'))
                     book_id = c.lastrowid
 
                 # Add to queue with special "loose_file" reason
@@ -2002,7 +2002,7 @@ def deep_scan_library(config):
                           datetime.now().isoformat(), 1))  # High priority
                 queued += 1
                 issues_found[path_str] = ['loose_file_no_folder']
-                logger.info(f"Queued loose file: {filename} -> search for: {clean_title}")
+                logger.info(f"Queued loose file: {filename} -> search for: {cleaned_filename}")
 
         # Second pass: Analyze folder structure
         for author_dir in lib_path.iterdir():
@@ -2010,6 +2010,16 @@ def deep_scan_library(config):
                 continue
 
             author = author_dir.name
+
+            # Skip system folders at author level - these are NEVER authors
+            author_system_folders = {'metadata', 'tmp', 'temp', 'cache', 'config', 'data', 'logs', 'log',
+                                     'backup', 'backups', 'old', 'new', 'test', 'tests', 'sample', 'samples',
+                                     '.thumbnails', 'thumbnails', 'covers', 'images', 'artwork', 'art',
+                                     'streams', '.streams', '.cache', '.metadata', '@eaDir', '#recycle'}
+            if author.lower() in author_system_folders or author.startswith('.') or author.startswith('@'):
+                logger.debug(f"Skipping system folder at author level: {author}")
+                continue
+
             author_issues = analyze_author(author)
 
             # Check if "author" folder is actually a book (has audio files directly)
@@ -2038,6 +2048,17 @@ def deep_scan_library(config):
                 if is_disc_chapter_folder(title):
                     # But flag the parent!
                     issues_found[str(author_dir)] = issues_found.get(str(author_dir), []) + [f"has_disc_folder:{title}"]
+                    continue
+
+                # Skip system/metadata folders - these are NEVER books
+                system_folders = {'metadata', 'tmp', 'temp', 'cache', 'config', 'data', 'logs', 'log',
+                                  'backup', 'backups', 'old', 'new', 'test', 'tests', 'sample', 'samples',
+                                  '.thumbnails', 'thumbnails', 'covers', 'images', 'artwork', 'art',
+                                  'extras', 'bonus', 'misc', 'other', 'various', 'unknown', 'unsorted',
+                                  'downloads', 'incoming', 'processing', 'completed', 'done', 'failed',
+                                  'streams', 'chapters', 'parts', '.streams', '.cache', '.metadata'}
+                if title.lower() in system_folders or title.startswith('.'):
+                    logger.debug(f"Skipping system folder: {path}")
                     continue
 
                 # Check if this is a SERIES folder containing multiple book subfolders
@@ -3726,6 +3747,124 @@ def _compare_versions(current, latest):
 
     return parse_version(latest) > parse_version(current)
 
+@app.route('/api/perform_update', methods=['POST'])
+def api_perform_update():
+    """Perform a git pull to update the application."""
+    import subprocess
+
+    # Get the app directory (where this script is located)
+    app_dir = os.path.dirname(os.path.abspath(__file__))
+
+    try:
+        # First check if we're in a git repo
+        result = subprocess.run(
+            ['git', 'rev-parse', '--git-dir'],
+            cwd=app_dir,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+
+        if result.returncode != 0:
+            return jsonify({
+                'success': False,
+                'error': 'Not a git repository. Manual update required.',
+                'instructions': 'Download the latest release from GitHub and replace your installation.'
+            })
+
+        # Get current commit before update
+        before = subprocess.run(
+            ['git', 'rev-parse', '--short', 'HEAD'],
+            cwd=app_dir, capture_output=True, text=True, timeout=10
+        ).stdout.strip()
+
+        # Perform git fetch + pull
+        fetch_result = subprocess.run(
+            ['git', 'fetch', '--all'],
+            cwd=app_dir,
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+
+        pull_result = subprocess.run(
+            ['git', 'pull', '--ff-only'],
+            cwd=app_dir,
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+
+        # Get new commit after update
+        after = subprocess.run(
+            ['git', 'rev-parse', '--short', 'HEAD'],
+            cwd=app_dir, capture_output=True, text=True, timeout=10
+        ).stdout.strip()
+
+        if pull_result.returncode != 0:
+            return jsonify({
+                'success': False,
+                'error': 'Git pull failed',
+                'details': pull_result.stderr or pull_result.stdout,
+                'instructions': 'You may have local changes. Try: git stash && git pull'
+            })
+
+        updated = before != after
+
+        return jsonify({
+            'success': True,
+            'updated': updated,
+            'before': before,
+            'after': after,
+            'output': pull_result.stdout,
+            'message': 'Update complete! Restart the app to apply changes.' if updated else 'Already up to date.',
+            'restart_required': updated
+        })
+
+    except subprocess.TimeoutExpired:
+        return jsonify({
+            'success': False,
+            'error': 'Update timed out. Check your network connection.'
+        })
+    except Exception as e:
+        logger.error(f"Update failed: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+@app.route('/api/restart', methods=['POST'])
+def api_restart():
+    """Restart the application (for systemd managed services)."""
+    import subprocess
+
+    try:
+        # Check if running under systemd
+        ppid = os.getppid()
+        result = subprocess.run(['ps', '-p', str(ppid), '-o', 'comm='],
+                               capture_output=True, text=True, timeout=5)
+
+        if 'systemd' in result.stdout:
+            # We're running under systemd, restart via systemctl
+            # This will kill this process, but systemd will restart it
+            subprocess.Popen(['sudo', 'systemctl', 'restart', 'library-manager.service'],
+                           start_new_session=True)
+            return jsonify({
+                'success': True,
+                'message': 'Restarting via systemd...'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Not running under systemd. Please restart manually.',
+                'instructions': 'Stop the current process and start it again.'
+            })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
 @app.route('/api/bug_report')
 def api_bug_report():
     """Generate a bug report with system info and sanitized config."""
@@ -4303,8 +4442,8 @@ def api_abs_remove_exclude():
 
 # ============== MANUAL BOOK MATCHING ==============
 
-BOOKBUCKET_URL = "http://localhost:8642"
-BOOKBUCKET_API_KEY = "Ff2PbA_jVaR7zHlJ3ehsTumf77jPccaDY0ipq3-NHQ4"
+# Use the public BookBucket API - same as metadata pipeline
+# Users need a bookdb_api_key in their config for manual matching features
 
 @app.route('/api/search_bookdb')
 def api_search_bookdb():
@@ -4317,16 +4456,21 @@ def api_search_bookdb():
     if not query or len(query) < 2:
         return jsonify({'error': 'Query must be at least 2 characters', 'results': []})
 
+    config = load_config()
+    api_key = config.get('bookdb_api_key')
+    if not api_key:
+        return jsonify({'error': 'BookDB API key not configured. Add bookdb_api_key to settings.', 'results': []})
+
     try:
         params = {'q': query, 'limit': limit}
         if author:
             params['author'] = author
 
-        endpoint = f"{BOOKBUCKET_URL}/search/{search_type}"
+        endpoint = f"{BOOKDB_API_URL}/search/{search_type}"
         resp = requests.get(
             endpoint,
             params=params,
-            headers={"X-API-Key": BOOKBUCKET_API_KEY},
+            headers={"X-API-Key": api_key},
             timeout=10
         )
 
@@ -4346,10 +4490,13 @@ def api_search_bookdb():
 @app.route('/api/bookdb_stats')
 def api_bookdb_stats():
     """Get BookBucket database statistics (book/author/series counts)."""
+    config = load_config()
+    api_key = config.get('bookdb_api_key')
+
     try:
         resp = requests.get(
-            f"{BOOKBUCKET_URL}/stats",
-            headers={"X-API-Key": BOOKBUCKET_API_KEY},
+            f"{BOOKDB_API_URL}/stats",
+            headers={"X-API-Key": api_key} if api_key else {},
             timeout=5
         )
         if resp.status_code == 200:
@@ -4367,11 +4514,14 @@ def api_book_detail(book_id):
     Get full book details from BookBucket + ABS status.
     Used for hover cards and detail modals.
     """
+    config = load_config()
+    api_key = config.get('bookdb_api_key')
+
     try:
         # Fetch full book details from BookBucket
         resp = requests.get(
-            f"{BOOKBUCKET_URL}/book/{book_id}",
-            headers={"X-API-Key": BOOKBUCKET_API_KEY},
+            f"{BOOKDB_API_URL}/book/{book_id}",
+            headers={"X-API-Key": api_key} if api_key else {},
             timeout=10
         )
 
@@ -4445,10 +4595,13 @@ def api_author_detail(author_id):
     Get author details from BookBucket.
     Used for hover cards on author search results.
     """
+    config = load_config()
+    api_key = config.get('bookdb_api_key')
+
     try:
         resp = requests.get(
-            f"{BOOKBUCKET_URL}/author/{author_id}",
-            headers={"X-API-Key": BOOKBUCKET_API_KEY},
+            f"{BOOKDB_API_URL}/author/{author_id}",
+            headers={"X-API-Key": api_key} if api_key else {},
             timeout=10
         )
 
@@ -4471,10 +4624,13 @@ def api_series_detail(series_id):
     Get series details from BookBucket.
     Used for hover cards on series search results.
     """
+    config = load_config()
+    api_key = config.get('bookdb_api_key')
+
     try:
         resp = requests.get(
-            f"{BOOKBUCKET_URL}/series/{series_id}",
-            headers={"X-API-Key": BOOKBUCKET_API_KEY},
+            f"{BOOKDB_API_URL}/series/{series_id}",
+            headers={"X-API-Key": api_key} if api_key else {},
             timeout=10
         )
 

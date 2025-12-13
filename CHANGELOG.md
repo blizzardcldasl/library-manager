@@ -2,6 +2,27 @@
 
 All notable changes to Library Manager will be documented in this file.
 
+## [0.9.0-beta.15] - 2025-12-13
+
+### Added
+- **In-browser updates** - Update directly from the web UI
+  - Click version badge (bottom left) to check for updates
+  - "Update Now" button performs `git pull` automatically
+  - "Restart App" button restarts the service after update
+  - Works with systemd-managed services
+- **Loose file detection** - Auto-creates folders for files dumped in library root
+  - Detects audio files without proper `Author/Title/` structure
+  - Searches metadata based on filename
+  - Creates proper folder structure automatically
+
+### Fixed
+- **System folder skipping** - Scanner no longer processes system folders as books
+  - Skips: `metadata`, `streams`, `tmp`, `cache`, `chapters`, `parts`, etc.
+  - Skips: `@eaDir`, `#recycle` (Synology special folders)
+  - Skips any folder starting with `.` or `@`
+  - Applies at both author AND title levels
+- **Variable naming conflict** - Fixed `clean_title` shadowing bug in loose file detection
+
 ## [0.9.0-beta.14] - 2025-12-12
 
 ### Added

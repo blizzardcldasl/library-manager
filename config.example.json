@@ -12,5 +12,6 @@
   "update_channel": "stable",
   "naming_format": "author/title",
   "series_grouping": true,
-  "google_books_api_key": null
+  "google_books_api_key": null,
+  "bookdb_api_key": null
 }

@@ -1,0 +1,915 @@
+{% extends "base.html" %}
+{% block title %}Audiobookshelf - Library Manager{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2><i class="bi bi-headphones"></i> Audiobookshelf Integration</h2>
+    <span class="text-muted">v{{ version }}</span>
+</div>
+
+{% if not abs_connected %}
+<!-- Connection Setup -->
+<div class="card mb-4">
+    <div class="card-header">
+        <i class="bi bi-plug"></i> Connect to Audiobookshelf
+    </div>
+    <div class="card-body">
+        <p class="text-muted">Connect to your ABS server to track user progress and manage your library.</p>
+        <div class="row">
+            <div class="col-md-6">
+                <div class="mb-3">
+                    <label class="form-label">ABS Server URL</label>
+                    <input type="url" class="form-control bg-dark text-light" id="abs-url"
+                           placeholder="http://localhost:13378" value="{{ config.abs_url or '' }}">
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="mb-3">
+                    <label class="form-label">API Token</label>
+                    <input type="password" class="form-control bg-dark text-light" id="abs-token"
+                           placeholder="Your ABS API token">
+                    <small class="text-muted">Find in ABS: Settings → Users → Click your user → API Token</small>
+                </div>
+            </div>
+        </div>
+        <button class="btn btn-primary" onclick="testConnection()">
+            <i class="bi bi-lightning"></i> Test & Connect
+        </button>
+        <span id="connection-status" class="ms-3"></span>
+    </div>
+</div>
+{% else %}
+<!-- Connected View -->
+<div class="row mb-3">
+    <div class="col-md-4">
+        <div class="card bg-success bg-opacity-25">
+            <div class="card-body py-2">
+                <i class="bi bi-check-circle"></i> Connected to ABS
+                <button class="btn btn-sm btn-outline-secondary float-end" onclick="disconnect()">Disconnect</button>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body py-2">
+                <label class="form-label mb-1">Select Library</label>
+                <select class="form-select form-select-sm bg-dark text-light" id="library-select" onchange="loadLibrary()">
+                    <option value="">Loading...</option>
+                </select>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body py-2">
+                <span id="stats-display">Select a library to view progress</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Navigation Tabs -->
+<ul class="nav nav-tabs mb-3" role="tablist">
+    <li class="nav-item">
+        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-progress" type="button">
+            <i class="bi bi-grid-3x3"></i> Progress Grid
+        </button>
+    </li>
+    <li class="nav-item">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-archive" type="button">
+            <i class="bi bi-archive"></i> Archive Candidates
+        </button>
+    </li>
+    <li class="nav-item">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-untouched" type="button">
+            <i class="bi bi-x-circle"></i> Untouched
+        </button>
+    </li>
+    <li class="nav-item">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-groups" type="button">
+            <i class="bi bi-people"></i> Groups & Rules
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content">
+    <!-- Progress Grid Tab -->
+    <div class="tab-pane fade show active" id="tab-progress">
+        <div class="table-responsive">
+            <table class="table table-dark table-striped table-hover" id="progress-table">
+                <thead id="progress-header">
+                    <tr>
+                        <th>Title</th>
+                        <th>Author</th>
+                        <th>Users Loading...</th>
+                    </tr>
+                </thead>
+                <tbody id="progress-body">
+                    <tr><td colspan="10" class="text-center text-muted">Select a library above</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Archive Candidates Tab -->
+    <div class="tab-pane fade" id="tab-archive">
+        <div class="alert alert-info">
+            <i class="bi bi-info-circle"></i> These books have been finished by at least one user and no one is currently reading them.
+        </div>
+        <div id="archive-list">
+            <p class="text-muted">Select a library to see archive candidates</p>
+        </div>
+    </div>
+
+    <!-- Untouched Tab -->
+    <div class="tab-pane fade" id="tab-untouched">
+        <div class="alert alert-warning">
+            <i class="bi bi-exclamation-triangle"></i> These books have never been started by anyone.
+        </div>
+        <div id="untouched-list">
+            <p class="text-muted">Select a library to see untouched items</p>
+        </div>
+    </div>
+
+    <!-- Groups & Rules Tab -->
+    <div class="tab-pane fade" id="tab-groups">
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <i class="bi bi-people"></i> User Groups
+                        <button class="btn btn-sm btn-outline-primary float-end" data-bs-toggle="modal" data-bs-target="#new-group-modal">
+                            <i class="bi bi-plus"></i> New Group
+                        </button>
+                    </div>
+                    <div class="card-body" id="user-groups-list">
+                        <p class="text-muted">No groups yet. Create one to set up archive rules.</p>
+                    </div>
+                </div>
+
+                <!-- Smart Assignments -->
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <i class="bi bi-magic"></i> Smart Assignments
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted small">Auto-assign books to groups by author or genre. Example: "Stephanie Meyer" → "Twilight Readers" group</p>
+
+                        <div class="mb-3">
+                            <label class="form-label">Assign Author to Group</label>
+                            <div class="input-group input-group-sm">
+                                <input type="text" class="form-control bg-dark text-light" id="assign-author" placeholder="Author name">
+                                <select class="form-select bg-dark text-light" id="assign-author-group" style="max-width: 150px;">
+                                    <option value="">Group...</option>
+                                </select>
+                                <button class="btn btn-outline-primary" onclick="assignAuthor()">Add</button>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Assign Genre to Group</label>
+                            <div class="input-group input-group-sm">
+                                <input type="text" class="form-control bg-dark text-light" id="assign-genre" placeholder="Genre">
+                                <select class="form-select bg-dark text-light" id="assign-genre-group" style="max-width: 150px;">
+                                    <option value="">Group...</option>
+                                </select>
+                                <button class="btn btn-outline-primary" onclick="assignGenre()">Add</button>
+                            </div>
+                        </div>
+
+                        <div id="assignments-list"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <i class="bi bi-gear"></i> Archive Rules
+                        <button class="btn btn-sm btn-outline-primary float-end" data-bs-toggle="modal" data-bs-target="#new-rule-modal">
+                            <i class="bi bi-plus"></i> New Rule
+                        </button>
+                    </div>
+                    <div class="card-body" id="rules-list">
+                        <p class="text-muted">No rules yet. Rules automate when to archive books.</p>
+                    </div>
+                </div>
+
+                <!-- Keep Forever / Exclude -->
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <i class="bi bi-shield-check"></i> Protection Lists
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted small">Protected items are NEVER flagged for archive/delete, even if rules match.</p>
+
+                        <div class="mb-3">
+                            <label class="form-label">Keep Forever (never archive)</label>
+                            <div class="input-group input-group-sm">
+                                <select class="form-select bg-dark text-light" id="keep-type" style="max-width: 100px;">
+                                    <option value="author">Author</option>
+                                    <option value="series">Series</option>
+                                </select>
+                                <input type="text" class="form-control bg-dark text-light" id="keep-value" placeholder="Name...">
+                                <button class="btn btn-outline-success" onclick="addKeepForever()">Keep</button>
+                            </div>
+                        </div>
+
+                        <div id="keep-forever-list" class="mb-3"></div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Exclude from Auto-Rules</label>
+                            <div class="input-group input-group-sm">
+                                <select class="form-select bg-dark text-light" id="exclude-type" style="max-width: 100px;">
+                                    <option value="author">Author</option>
+                                    <option value="genre">Genre</option>
+                                </select>
+                                <input type="text" class="form-control bg-dark text-light" id="exclude-value" placeholder="Name...">
+                                <button class="btn btn-outline-warning" onclick="addExclude()">Exclude</button>
+                            </div>
+                        </div>
+
+                        <div id="exclude-list"></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <i class="bi bi-lightning"></i> Rule Matches
+                    </div>
+                    <div class="card-body" id="rule-matches">
+                        <p class="text-muted">Select a library and check rules to see matches</p>
+                    </div>
+                    <div class="card-footer">
+                        <button class="btn btn-warning btn-sm" onclick="checkRules()">
+                            <i class="bi bi-search"></i> Check Rules
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- New Group Modal -->
+<div class="modal fade" id="new-group-modal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content bg-dark">
+            <div class="modal-header">
+                <h5 class="modal-title">Create User Group</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label">Group Name</label>
+                    <input type="text" class="form-control bg-dark text-light" id="new-group-name"
+                           placeholder="e.g., Family, Kids, Main Listeners">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Select Users</label>
+                    <div id="user-checkboxes">Loading users...</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="createGroup()">Create Group</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- New Rule Modal -->
+<div class="modal fade" id="new-rule-modal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content bg-dark">
+            <div class="modal-header">
+                <h5 class="modal-title">Create Archive Rule</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label">Rule Name</label>
+                    <input type="text" class="form-control bg-dark text-light" id="new-rule-name"
+                           placeholder="e.g., Archive when family done">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">When everyone in this group finishes:</label>
+                    <select class="form-select bg-dark text-light" id="new-rule-group">
+                        <option value="">Select a user group</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Action</label>
+                    <select class="form-select bg-dark text-light" id="new-rule-action">
+                        <option value="archive">Mark for Archive</option>
+                        <option value="delete">Mark for Deletion</option>
+                        <option value="notify">Notify Only</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="createRule()">Create Rule</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<script>
+let absUsers = [];
+let absLibraries = [];
+let currentLibraryId = null;
+
+{% if abs_connected %}
+// Load data on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadUsers();
+    loadLibraries();
+    loadGroups();
+});
+{% endif %}
+
+function testConnection() {
+    const url = document.getElementById('abs-url').value;
+    const token = document.getElementById('abs-token').value;
+    const status = document.getElementById('connection-status');
+
+    status.innerHTML = '<span class="text-warning"><i class="bi bi-hourglass-split"></i> Testing...</span>';
+
+    fetch('/api/abs/connect', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({url: url, token: token})
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            status.innerHTML = '<span class="text-success"><i class="bi bi-check-circle"></i> ' + data.message + '</span>';
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            status.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle"></i> ' + data.error + '</span>';
+        }
+    });
+}
+
+function disconnect() {
+    if (confirm('Disconnect from ABS?')) {
+        fetch('/api/abs/connect', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({url: '', token: ''})
+        }).then(() => location.reload());
+    }
+}
+
+function loadUsers() {
+    fetch('/api/abs/users')
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            absUsers = data.users;
+            updateUserCheckboxes();
+        }
+    });
+}
+
+function loadLibraries() {
+    fetch('/api/abs/libraries')
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            absLibraries = data.libraries;
+            const select = document.getElementById('library-select');
+            select.innerHTML = '<option value="">Select a library...</option>';
+            data.libraries.forEach(lib => {
+                select.innerHTML += `<option value="${lib.id}">${lib.name}</option>`;
+            });
+        }
+    });
+}
+
+function loadLibrary() {
+    const select = document.getElementById('library-select');
+    currentLibraryId = select.value;
+    if (!currentLibraryId) return;
+
+    // Load progress grid
+    fetch(`/api/abs/library/${currentLibraryId}/progress`)
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            renderProgressGrid(data.items);
+        }
+    });
+
+    // Load archive candidates
+    fetch(`/api/abs/archivable/${currentLibraryId}`)
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            renderArchiveList(data.items);
+        }
+    });
+
+    // Load untouched
+    fetch(`/api/abs/untouched/${currentLibraryId}`)
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            renderUntouchedList(data.items);
+        }
+    });
+}
+
+function renderProgressGrid(items) {
+    // Get all unique users from progress data
+    const userSet = new Set();
+    items.forEach(item => {
+        Object.keys(item.user_progress || {}).forEach(uid => userSet.add(uid));
+    });
+
+    // Build user lookup
+    const userLookup = {};
+    absUsers.forEach(u => userLookup[u.id] = u.username);
+
+    // Build header
+    const header = document.getElementById('progress-header');
+    let headerHtml = '<tr><th>Title</th><th>Author</th>';
+    userSet.forEach(uid => {
+        headerHtml += `<th class="text-center">${userLookup[uid] || uid}</th>`;
+    });
+    headerHtml += '<th>Status</th></tr>';
+    header.innerHTML = headerHtml;
+
+    // Build body
+    const body = document.getElementById('progress-body');
+    if (items.length === 0) {
+        body.innerHTML = '<tr><td colspan="10" class="text-center text-muted">No items found</td></tr>';
+        return;
+    }
+
+    let bodyHtml = '';
+    items.forEach(item => {
+        bodyHtml += `<tr>
+            <td>${item.title}</td>
+            <td class="text-muted">${item.author}</td>`;
+
+        userSet.forEach(uid => {
+            const progress = item.user_progress[uid];
+            if (progress) {
+                const pct = Math.round(progress.progress * 100);
+                let badge = 'secondary';
+                let icon = 'hourglass-split';
+                if (progress.is_finished) {
+                    badge = 'success';
+                    icon = 'check-circle-fill';
+                } else if (pct > 0) {
+                    badge = 'warning';
+                    icon = 'play-circle';
+                }
+                bodyHtml += `<td class="text-center">
+                    <span class="badge bg-${badge}" title="${pct}%">
+                        <i class="bi bi-${icon}"></i> ${pct}%
+                    </span>
+                </td>`;
+            } else {
+                bodyHtml += '<td class="text-center"><span class="text-muted">-</span></td>';
+            }
+        });
+
+        // Status summary
+        const summary = item.progress_summary;
+        let statusBadge = 'secondary';
+        let statusText = 'Untouched';
+        if (summary.users_finished > 0 && summary.users_in_progress === 0) {
+            statusBadge = 'success';
+            statusText = 'Archivable';
+        } else if (summary.users_in_progress > 0) {
+            statusBadge = 'warning';
+            statusText = 'In Progress';
+        }
+        bodyHtml += `<td><span class="badge bg-${statusBadge}">${statusText}</span></td></tr>`;
+    });
+
+    body.innerHTML = bodyHtml;
+
+    // Update stats
+    const total = items.length;
+    const archivable = items.filter(i => i.progress_summary.users_finished > 0 && i.progress_summary.users_in_progress === 0).length;
+    const inProgress = items.filter(i => i.progress_summary.users_in_progress > 0).length;
+    const untouched = items.filter(i => i.progress_summary.untouched).length;
+
+    document.getElementById('stats-display').innerHTML =
+        `<strong>${total}</strong> items | <span class="text-success">${archivable} archivable</span> | <span class="text-warning">${inProgress} in progress</span> | <span class="text-muted">${untouched} untouched</span>`;
+}
+
+function renderArchiveList(items) {
+    const container = document.getElementById('archive-list');
+    if (items.length === 0) {
+        container.innerHTML = '<p class="text-muted">No books ready to archive yet.</p>';
+        return;
+    }
+
+    let html = '<div class="list-group">';
+    items.forEach(item => {
+        html += `<div class="list-group-item list-group-item-action bg-dark">
+            <div class="d-flex justify-content-between">
+                <div>
+                    <strong>${item.title}</strong><br>
+                    <small class="text-muted">${item.author}</small>
+                </div>
+                <div>
+                    <span class="badge bg-success">${item.users_finished} finished</span>
+                </div>
+            </div>
+        </div>`;
+    });
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+function renderUntouchedList(items) {
+    const container = document.getElementById('untouched-list');
+    if (items.length === 0) {
+        container.innerHTML = '<p class="text-success">All books have been started by someone!</p>';
+        return;
+    }
+
+    let html = '<div class="list-group">';
+    items.forEach(item => {
+        html += `<div class="list-group-item list-group-item-action bg-dark">
+            <strong>${item.title}</strong><br>
+            <small class="text-muted">${item.author}</small>
+        </div>`;
+    });
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+function updateUserCheckboxes() {
+    const container = document.getElementById('user-checkboxes');
+    if (absUsers.length === 0) {
+        container.innerHTML = '<p class="text-muted">No users found</p>';
+        return;
+    }
+
+    let html = '';
+    absUsers.forEach(user => {
+        html += `<div class="form-check">
+            <input class="form-check-input" type="checkbox" value="${user.id}" id="user-${user.id}">
+            <label class="form-check-label" for="user-${user.id}">
+                ${user.username} <small class="text-muted">(${user.type})</small>
+            </label>
+        </div>`;
+    });
+    container.innerHTML = html;
+}
+
+function loadGroups() {
+    fetch('/api/abs/groups')
+    .then(r => r.json())
+    .then(data => {
+        renderGroups(data);
+        updateRuleGroupSelect(data.user_groups);
+    });
+}
+
+function renderGroups(data) {
+    // Render user groups
+    const groupsContainer = document.getElementById('user-groups-list');
+    if (data.user_groups.length === 0) {
+        groupsContainer.innerHTML = '<p class="text-muted">No groups yet.</p>';
+    } else {
+        let html = '<div class="list-group">';
+        data.user_groups.forEach(group => {
+            const userNames = group.user_ids.map(uid => {
+                const user = absUsers.find(u => u.id === uid);
+                return user ? user.username : uid;
+            }).join(', ');
+
+            html += `<div class="list-group-item bg-dark d-flex justify-content-between">
+                <div>
+                    <strong>${group.name}</strong><br>
+                    <small class="text-muted">${userNames || 'No users'}</small>
+                </div>
+                <button class="btn btn-sm btn-outline-danger" onclick="deleteGroup('${group.id}')">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </div>`;
+        });
+        html += '</div>';
+        groupsContainer.innerHTML = html;
+    }
+
+    // Render rules
+    const rulesContainer = document.getElementById('rules-list');
+    if (data.rules.length === 0) {
+        rulesContainer.innerHTML = '<p class="text-muted">No rules yet.</p>';
+    } else {
+        let html = '<div class="list-group">';
+        data.rules.forEach(rule => {
+            const group = data.user_groups.find(g => g.id === rule.user_group_id);
+            html += `<div class="list-group-item bg-dark">
+                <strong>${rule.name}</strong><br>
+                <small class="text-muted">
+                    When "${group ? group.name : 'Unknown group'}" finishes → ${rule.action}
+                </small>
+            </div>`;
+        });
+        html += '</div>';
+        rulesContainer.innerHTML = html;
+    }
+}
+
+function updateRuleGroupSelect(groups) {
+    const select = document.getElementById('new-rule-group');
+    select.innerHTML = '<option value="">Select a user group</option>';
+    groups.forEach(g => {
+        select.innerHTML += `<option value="${g.id}">${g.name}</option>`;
+    });
+}
+
+function createGroup() {
+    const name = document.getElementById('new-group-name').value;
+    const checkboxes = document.querySelectorAll('#user-checkboxes input:checked');
+    const userIds = Array.from(checkboxes).map(cb => cb.value);
+
+    fetch('/api/abs/groups/user', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name: name, user_ids: userIds})
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('new-group-modal')).hide();
+            loadGroups();
+        }
+    });
+}
+
+function deleteGroup(groupId) {
+    if (confirm('Delete this group?')) {
+        fetch(`/api/abs/groups/user/${groupId}`, {method: 'DELETE'})
+        .then(() => loadGroups());
+    }
+}
+
+function createRule() {
+    const name = document.getElementById('new-rule-name').value;
+    const groupId = document.getElementById('new-rule-group').value;
+    const action = document.getElementById('new-rule-action').value;
+
+    fetch('/api/abs/groups/rule', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name: name, user_group_id: groupId, action: action})
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('new-rule-modal')).hide();
+            loadGroups();
+        }
+    });
+}
+
+function checkRules() {
+    if (!currentLibraryId) {
+        alert('Select a library first');
+        return;
+    }
+
+    fetch(`/api/abs/check_rules/${currentLibraryId}`)
+    .then(r => r.json())
+    .then(data => {
+        const container = document.getElementById('rule-matches');
+        if (data.matches.length === 0) {
+            container.innerHTML = '<p class="text-muted">No books match your rules yet.</p>';
+            return;
+        }
+
+        let html = '<div class="list-group">';
+        data.matches.forEach(match => {
+            let badgeClass = 'secondary';
+            if (match.action === 'archive') badgeClass = 'warning';
+            if (match.action === 'delete') badgeClass = 'danger';
+
+            html += `<div class="list-group-item bg-dark">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <strong>${match.title}</strong><br>
+                        <small class="text-muted">${match.author}</small>
+                    </div>
+                    <div>
+                        <span class="badge bg-${badgeClass}">${match.action}</span><br>
+                        <small class="text-muted">${match.rule_name}</small>
+                    </div>
+                </div>
+            </div>`;
+        });
+        html += '</div>';
+        container.innerHTML = html;
+    });
+}
+
+// ============== SMART ASSIGNMENTS ==============
+
+function assignAuthor() {
+    const author = document.getElementById('assign-author').value.trim();
+    const groupId = document.getElementById('assign-author-group').value;
+
+    if (!author || !groupId) {
+        alert('Enter author name and select a group');
+        return;
+    }
+
+    fetch('/api/abs/assign/author', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({author: author, group_id: groupId})
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById('assign-author').value = '';
+            loadGroups();
+        }
+    });
+}
+
+function assignGenre() {
+    const genre = document.getElementById('assign-genre').value.trim();
+    const groupId = document.getElementById('assign-genre-group').value;
+
+    if (!genre || !groupId) {
+        alert('Enter genre and select a group');
+        return;
+    }
+
+    fetch('/api/abs/assign/genre', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({genre: genre, group_id: groupId})
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById('assign-genre').value = '';
+            loadGroups();
+        }
+    });
+}
+
+function removeAssignment(type, value) {
+    fetch(`/api/abs/assign/${type}/${encodeURIComponent(value)}`, {method: 'DELETE'})
+    .then(() => loadGroups());
+}
+
+// ============== KEEP FOREVER / EXCLUDE ==============
+
+function addKeepForever() {
+    const type = document.getElementById('keep-type').value;
+    const value = document.getElementById('keep-value').value.trim();
+
+    if (!value) {
+        alert('Enter a name');
+        return;
+    }
+
+    fetch('/api/abs/keep', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({type: type, value: value})
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById('keep-value').value = '';
+            loadGroups();
+        }
+    });
+}
+
+function removeKeep(type, value) {
+    fetch('/api/abs/keep', {
+        method: 'DELETE',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({type: type, value: value})
+    })
+    .then(() => loadGroups());
+}
+
+function addExclude() {
+    const type = document.getElementById('exclude-type').value;
+    const value = document.getElementById('exclude-value').value.trim();
+
+    if (!value) {
+        alert('Enter a name');
+        return;
+    }
+
+    fetch('/api/abs/exclude', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({type: type, value: value})
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById('exclude-value').value = '';
+            loadGroups();
+        }
+    });
+}
+
+function removeExclude(type, value) {
+    fetch('/api/abs/exclude', {
+        method: 'DELETE',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({type: type, value: value})
+    })
+    .then(() => loadGroups());
+}
+
+// Update renderGroups to show assignments and protection lists
+const originalRenderGroups = renderGroups;
+renderGroups = function(data) {
+    originalRenderGroups(data);
+
+    // Update group selects for smart assignments
+    const groupOptions = '<option value="">Group...</option>' +
+        data.user_groups.map(g => `<option value="${g.id}">${g.name}</option>`).join('');
+    document.getElementById('assign-author-group').innerHTML = groupOptions;
+    document.getElementById('assign-genre-group').innerHTML = groupOptions;
+
+    // Render assignments
+    const assignContainer = document.getElementById('assignments-list');
+    let assignHtml = '';
+
+    const authorAssignments = data.author_assignments || {};
+    const genreAssignments = data.genre_assignments || {};
+
+    if (Object.keys(authorAssignments).length > 0 || Object.keys(genreAssignments).length > 0) {
+        assignHtml += '<div class="small">';
+
+        for (const [author, groupId] of Object.entries(authorAssignments)) {
+            const group = data.user_groups.find(g => g.id === groupId);
+            assignHtml += `<span class="badge bg-primary me-1 mb-1">
+                <i class="bi bi-person"></i> ${author} → ${group ? group.name : '?'}
+                <i class="bi bi-x-circle ms-1" style="cursor:pointer" onclick="removeAssignment('author','${author}')"></i>
+            </span>`;
+        }
+
+        for (const [genre, groupId] of Object.entries(genreAssignments)) {
+            const group = data.user_groups.find(g => g.id === groupId);
+            assignHtml += `<span class="badge bg-info me-1 mb-1">
+                <i class="bi bi-tag"></i> ${genre} → ${group ? group.name : '?'}
+                <i class="bi bi-x-circle ms-1" style="cursor:pointer" onclick="removeAssignment('genre','${genre}')"></i>
+            </span>`;
+        }
+
+        assignHtml += '</div>';
+    }
+    assignContainer.innerHTML = assignHtml;
+
+    // Render keep forever list
+    const keepContainer = document.getElementById('keep-forever-list');
+    const keepForever = data.keep_forever || {items: [], authors: [], series: []};
+    let keepHtml = '';
+
+    keepForever.authors.forEach(a => {
+        keepHtml += `<span class="badge bg-success me-1 mb-1">
+            <i class="bi bi-person"></i> ${a}
+            <i class="bi bi-x-circle ms-1" style="cursor:pointer" onclick="removeKeep('author','${a}')"></i>
+        </span>`;
+    });
+    keepForever.series.forEach(s => {
+        keepHtml += `<span class="badge bg-success me-1 mb-1">
+            <i class="bi bi-collection"></i> ${s}
+            <i class="bi bi-x-circle ms-1" style="cursor:pointer" onclick="removeKeep('series','${s}')"></i>
+        </span>`;
+    });
+    keepContainer.innerHTML = keepHtml;
+
+    // Render exclude list
+    const excludeContainer = document.getElementById('exclude-list');
+    const exclude = data.exclude_from_rules || {authors: [], genres: []};
+    let excludeHtml = '';
+
+    exclude.authors.forEach(a => {
+        excludeHtml += `<span class="badge bg-warning text-dark me-1 mb-1">
+            <i class="bi bi-person"></i> ${a}
+            <i class="bi bi-x-circle ms-1" style="cursor:pointer" onclick="removeExclude('author','${a}')"></i>
+        </span>`;
+    });
+    exclude.genres.forEach(g => {
+        excludeHtml += `<span class="badge bg-warning text-dark me-1 mb-1">
+            <i class="bi bi-tag"></i> ${g}
+            <i class="bi bi-x-circle ms-1" style="cursor:pointer" onclick="removeExclude('genre','${g}')"></i>
+        </span>`;
+    });
+    excludeContainer.innerHTML = excludeHtml;
+};
+</script>
+{% endblock %}
