@@ -47,3 +47,6 @@ metadata_scraper/PROJECT_BIBLE.md
 # User screenshots
 static/Screenshot*
 static/Untitled*
+
+# Private content - canned replies, personal notes
+static/reddit-replies.html

@@ -2,7 +2,9 @@ version: "3.8"
 
 services:
   library-manager:
-    build: .
+    image: ghcr.io/deucebucket/library-manager:latest
+    # Or build locally: comment out 'image' above, uncomment below
+    # build: .
     container_name: library-manager
     restart: unless-stopped
     ports:

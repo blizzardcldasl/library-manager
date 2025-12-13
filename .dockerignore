@@ -1,0 +1,61 @@
+# Git
+.git
+.gitignore
+.github
+
+# Development files
+metadata_scraper/
+scripts/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# User data (created at runtime)
+config.json
+secrets.json
+library.db
+library_manager.db
+*.db
+*.db-wal
+*.db-shm
+
+# Logs
+*.log
+logs/
+
+# Documentation (not needed in runtime)
+docs/
+*.md
+!requirements.txt
+
+# Docker files (not needed inside container)
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# UnRaid template
+unraid/
+
+# Examples (users create their own)
+config.example.json
+secrets.example.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test files
+tests/
+test_*.py
+*_test.py
