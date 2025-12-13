@@ -2,6 +2,23 @@
 
 All notable changes to Library Manager will be documented in this file.
 
+## [0.9.0-beta.19] - 2025-12-13
+
+### Added
+- **Ebook Management (Beta)** - Organize ebooks alongside audiobooks
+  - New "Enable Ebook Management" toggle in Settings > Behavior
+  - Supported formats: `.epub`, `.pdf`, `.mobi`, `.azw3`
+  - Two library modes:
+    - **Merge with Audiobooks** - Places ebooks in matching audiobook folders (ABS compatible)
+    - **Separate Library** - Creates standalone ebook folder structure
+  - Scans loose ebook files and ebook-only folders
+  - Uses same identification pipeline (BookDB + AI) as audiobooks
+
+### Fixed
+- **File handling in apply_fix** - Now properly handles single files, not just folders
+
+---
+
 ## [0.9.0-beta.18] - 2025-12-13
 
 ### Added
