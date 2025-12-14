@@ -2,6 +2,20 @@
 
 All notable changes to Library Manager will be documented in this file.
 
+## [0.9.0-beta.25] - 2025-12-13
+
+### Fixed
+- **Issue #15: Search results showing "Unknown"** - Fixed API field mismatch
+  - BookDB API returns `name` field, but frontend expected `title`
+  - Search results now display correctly, form fields populate on selection
+  - Manual match save no longer fails with JSON parse error
+- **Config loss on container updates** - Critical Docker persistence fix
+  - `user_groups.json` now stored in `/data/` (was `/app/` - wiped on update!)
+  - Backup/restore now uses correct DATA_DIR path
+  - All persistent files now properly stored in mounted volume
+
+---
+
 ## [0.9.0-beta.24] - 2025-12-13
 
 ### Fixed

@@ -11,7 +11,7 @@ Features:
 - Multi-provider AI (Gemini, OpenRouter, Ollama)
 """
 
-APP_VERSION = "0.9.0-beta.24"
+APP_VERSION = "0.9.0-beta.25"
 GITHUB_REPO = "deucebucket/library-manager"  # Your GitHub repo
 
 # Versioning Guide:
@@ -6115,7 +6115,7 @@ def api_abs_untouched(library_id):
 
 # ============== USER GROUPS (for ABS progress rules) ==============
 
-GROUPS_PATH = BASE_DIR / 'user_groups.json'
+GROUPS_PATH = DATA_DIR / 'user_groups.json'
 
 DEFAULT_GROUPS_DATA = {
     'user_groups': [],      # Groups of ABS users (e.g., "Twilight Readers": [wife, daughter1, daughter2])
@@ -6672,7 +6672,7 @@ def api_manual_match():
     # Determine new values
     if bookdb_result:
         new_author = bookdb_result.get('author_name') or new_author
-        new_title = bookdb_result.get('title') or new_title
+        new_title = bookdb_result.get('name') or bookdb_result.get('title') or new_title
         # Include series info if available
         series_name = bookdb_result.get('series_name')
         series_pos = bookdb_result.get('series_position')
@@ -6743,7 +6743,7 @@ def api_backup():
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
             for filename in BACKUP_FILES:
-                filepath = BASE_DIR / filename
+                filepath = DATA_DIR / filename  # Use DATA_DIR for persistent files
                 if filepath.exists():
                     zf.write(filepath, filename)
                     logger.info(f"Backup: Added {filename}")
@@ -6752,7 +6752,7 @@ def api_backup():
             metadata = {
                 'backup_date': datetime.now().isoformat(),
                 'version': APP_VERSION,
-                'files': [f for f in BACKUP_FILES if (BASE_DIR / f).exists()]
+                'files': [f for f in BACKUP_FILES if (DATA_DIR / f).exists()]
             }
             zf.writestr('backup_metadata.json', json.dumps(metadata, indent=2))
 
@@ -6785,11 +6785,11 @@ def api_restore():
 
     try:
         # Create a timestamped backup of current state first
-        current_backup_dir = BASE_DIR / 'backups' / f'pre_restore_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
+        current_backup_dir = DATA_DIR / 'backups' / f'pre_restore_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
         current_backup_dir.mkdir(parents=True, exist_ok=True)
 
         for filename in BACKUP_FILES:
-            filepath = BASE_DIR / filename
+            filepath = DATA_DIR / filename  # Use DATA_DIR for persistent files
             if filepath.exists():
                 import shutil
                 shutil.copy2(filepath, current_backup_dir / filename)
@@ -6806,8 +6806,8 @@ def api_restore():
 
             for filename in BACKUP_FILES:
                 if filename in zf.namelist():
-                    # Extract to app directory
-                    target_path = BASE_DIR / filename
+                    # Extract to data directory (persistent)
+                    target_path = DATA_DIR / filename
                     with zf.open(filename) as src:
                         with open(target_path, 'wb') as dst:
                             dst.write(src.read())
@@ -6838,7 +6838,7 @@ def api_backup_info():
     total_size = 0
 
     for filename in BACKUP_FILES:
-        filepath = BASE_DIR / filename
+        filepath = DATA_DIR / filename  # Use DATA_DIR for persistent files
         if filepath.exists():
             size = filepath.stat().st_size
             total_size += size

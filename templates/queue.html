@@ -475,7 +475,7 @@ function searchBookDB() {
 
             resultsList.innerHTML = data.results.map((book, idx) => {
                 const author = book.author_name || 'Unknown Author';
-                const title = book.title || 'Unknown Title';
+                const title = book.name || book.title || 'Unknown Title';
                 const series = book.series_name ? `${book.series_name}${book.series_position ? ' #' + book.series_position : ''}` : '';
                 const year = book.year_published ? book.year_published : '';
                 const isbn = book.isbn || '';
@@ -556,21 +556,21 @@ function selectResult(idx) {
     if (book.author_name) {
         document.getElementById('edit-author').value = book.author_name;
     }
-    if (book.title) {
-        document.getElementById('edit-title').value = book.title;
+    if (book.name || book.title) {
+        document.getElementById('edit-title').value = book.name || book.title;
     }
 
     // Show selected match
     const matchDiv = document.getElementById('selected-match');
     const matchText = document.getElementById('selected-match-text');
     const series = book.series_name ? ` (${book.series_name}${book.series_position ? ' #' + book.series_position : ''})` : '';
-    matchText.textContent = `${book.author_name || 'Unknown'} - ${book.title}${series}`;
+    matchText.textContent = `${book.author_name || 'Unknown'} - ${book.name || book.title || 'Unknown'}${series}`;
     matchDiv.classList.remove('d-none');
 
     // Hide search results
     document.getElementById('search-results').style.display = 'none';
 
-    log(`Selected: ${book.author_name} - ${book.title}`);
+    log(`Selected: ${book.author_name} - ${book.name || book.title}`);
 }
 
 function clearSelection() {
@@ -705,7 +705,7 @@ function renderHoverCard(data) {
     const book = data.book;
     const absStatus = data.abs_status || [];
 
-    document.getElementById('hover-title').textContent = book.title || 'Unknown Title';
+    document.getElementById('hover-title').textContent = book.name || book.title || 'Unknown Title';
     document.getElementById('hover-author').textContent = book.author_name || 'Unknown Author';
 
     // Series
@@ -828,7 +828,7 @@ function renderDetailModal(data) {
     const book = data.book;
     const absStatus = data.abs_status || [];
 
-    document.getElementById('detail-title').textContent = book.title || 'Unknown Title';
+    document.getElementById('detail-title').textContent = book.name || book.title || 'Unknown Title';
     document.getElementById('detail-author').textContent = book.author_name || 'Unknown Author';
 
     // Series
@@ -900,13 +900,13 @@ function useBookFromDetail() {
     } else {
         // Direct fill if not in results
         document.getElementById('edit-author').value = currentDetailBook.author_name || '';
-        document.getElementById('edit-title').value = currentDetailBook.title || '';
+        document.getElementById('edit-title').value = currentDetailBook.name || currentDetailBook.title || '';
         selectedBookDBResult = currentDetailBook;
 
         const matchDiv = document.getElementById('selected-match');
         const matchText = document.getElementById('selected-match-text');
         const series = currentDetailBook.series_name ? ` (${currentDetailBook.series_name})` : '';
-        matchText.textContent = `${currentDetailBook.author_name || 'Unknown'} - ${currentDetailBook.title}${series}`;
+        matchText.textContent = `${currentDetailBook.author_name || 'Unknown'} - ${currentDetailBook.name || currentDetailBook.title || 'Unknown'}${series}`;
         matchDiv.classList.remove('d-none');
         document.getElementById('search-results').style.display = 'none';
     }
