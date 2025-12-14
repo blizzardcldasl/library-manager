@@ -607,7 +607,10 @@ function updateNamingPreview() {
     preview = preview.replace(/\(\s*\)/g, '');
     preview = preview.replace(/\[\s*\]/g, '');
     preview = preview.replace(/\{\s*\}/g, '');
-    preview = preview.replace(/\s+-\s+(?=-|\/|$)/g, '');
+    preview = preview.replace(/\s+-\s+(?=-|\/|$)/g, '');  // Dangling " - " before separator
+    preview = preview.replace(/\/-\s+/g, '/');  // Leading "- " after slash
+    preview = preview.replace(/^-\s+/, '');  // Leading "- " at start
+    preview = preview.replace(/\s+-$/, '');  // Trailing " -" at end
     preview = preview.replace(/\/+/g, '/');
     preview = preview.replace(/\s{2,}/g, ' ');
     preview = preview.trim();

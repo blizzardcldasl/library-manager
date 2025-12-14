@@ -2,6 +2,17 @@
 
 All notable changes to Library Manager will be documented in this file.
 
+## [0.9.0-beta.27] - 2025-12-13
+
+### Fixed
+- **Issue #16: Custom template cleanup** - Fixed "dangling dash" in naming templates
+  - Template `{author}/{series}/{series_num} - {title}` with no series
+  - Before: `Barbara Truelove/- Of Monsters and Mainframes` (broken)
+  - After: `Barbara Truelove/Of Monsters and Mainframes` (clean)
+  - Added cleanup for leading/trailing dashes in path segments
+
+---
+
 ## [0.9.0-beta.26] - 2025-12-13
 
 ### Added
