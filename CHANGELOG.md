@@ -2,6 +2,19 @@
 
 All notable changes to Library Manager will be documented in this file.
 
+## [0.9.0-beta.24] - 2025-12-13
+
+### Fixed
+- **Trust existing authors** - Major fix for bad author suggestions
+  - When folder already has a valid author name (e.g., "Matt Ruff"), keep it
+  - Only replace author if current one is a placeholder (Unknown, Various, etc.)
+  - Prevents wrong suggestions like "Matt Ruff" → "Anghel Dragomir" when both wrote "The Destroyer of Worlds"
+  - Added `is_placeholder_author()` helper function
+- **System folder filtering** - Added metadata/tmp/streams/cache/logs to placeholder list
+  - These system folders are no longer misinterpreted as author names
+
+---
+
 ## [0.9.0-beta.23] - 2025-12-13
 
 ### Fixed

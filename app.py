@@ -11,7 +11,7 @@ Features:
 - Multi-provider AI (Gemini, OpenRouter, Ollama)
 """
 
-APP_VERSION = "0.9.0-beta.23"
+APP_VERSION = "0.9.0-beta.24"
 GITHUB_REPO = "deucebucket/library-manager"  # Your GitHub repo
 
 # Versioning Guide:
@@ -564,9 +564,11 @@ def is_drastic_author_change(old_author, new_author):
     # Placeholder authors - going FROM these to a real author is NOT drastic
     placeholder_authors = {'unknown', 'various', 'various authors', 'va', 'n/a', 'none',
                            'audiobook', 'audiobooks', 'ebook', 'ebooks', 'book', 'books',
-                           'author', 'authors', 'narrator', 'untitled', 'no author'}
+                           'author', 'authors', 'narrator', 'untitled', 'no author',
+                           'metadata', 'tmp', 'temp', 'streams', 'cache'}  # System folders too
     if old_norm in placeholder_authors:
         return False  # Finding the real author is always good
+
 
     # If they're the same after normalization, not drastic
     if old_norm == new_norm:
@@ -604,6 +606,18 @@ def is_drastic_author_change(old_author, new_author):
         return True
 
     return False
+
+
+def is_placeholder_author(name):
+    """Check if an author name is a placeholder/system name that should be replaced."""
+    if not name:
+        return True
+    name_lower = name.lower().strip()
+    placeholder_authors = {'unknown', 'various', 'various authors', 'va', 'n/a', 'none',
+                           'audiobook', 'audiobooks', 'ebook', 'ebooks', 'book', 'books',
+                           'author', 'authors', 'narrator', 'untitled', 'no author',
+                           'metadata', 'tmp', 'temp', 'streams', 'cache', 'data', 'log', 'logs'}
+    return name_lower in placeholder_authors
 
 # ============== BOOK METADATA APIs ==============
 
@@ -2270,17 +2284,22 @@ def search_bookdb_api(title):
 
                     result_author = item.get('author_name', '')
 
-                    # NEW: If we have an original author, reject if result author is completely different
-                    # AND title isn't exact match (allow author correction only for exact title matches)
-                    if author and result_author:
-                        title_is_exact = suggested_title.lower().strip() == search_title.lower().strip()
+                    # TRUST EXISTING AUTHORS: If we have a valid (non-placeholder) author,
+                    # keep it even if API returns a different author. Same title can exist
+                    # by different authors - "The Destroyer of Worlds" by Matt Ruff is different
+                    # from "The Destroyer of Worlds" by someone else.
+                    if author and result_author and not is_placeholder_author(author):
                         author_is_drastic = is_drastic_author_change(author, result_author)
-
-                        if author_is_drastic and not title_is_exact:
-                            logger.debug(f"BookDB API: Rejected author mismatch - '{author}' vs '{result_author}' for non-exact title '{search_title}' vs '{suggested_title}'")
-                            continue
-
-                    author = result_author
+                        if author_is_drastic:
+                            # Found title match, but keep ORIGINAL author (trust folder structure)
+                            logger.debug(f"BookDB API: Title match found but keeping original author '{author}' (API had '{result_author}')")
+                            # Don't change author - use original
+                        else:
+                            # Authors are similar (same person, different format) - use API version
+                            author = result_author
+                    else:
+                        # No original author or it's a placeholder - use API author
+                        author = result_author
                     # Fix author format (some have "Last, First")
                     if ',' in author and author.count(',') == 1:
                         parts = author.split(',')
@@ -2305,16 +2324,16 @@ def search_bookdb_api(title):
 
                     result_author = item.get('author_name', '')
 
-                    # Same author mismatch check for series
-                    if author and result_author:
-                        title_is_exact = suggested_title.lower().strip() == search_title.lower().strip()
+                    # TRUST EXISTING AUTHORS for series too
+                    if author and result_author and not is_placeholder_author(author):
                         author_is_drastic = is_drastic_author_change(author, result_author)
-
-                        if author_is_drastic and not title_is_exact:
-                            logger.debug(f"BookDB API: Rejected series author mismatch - '{author}' vs '{result_author}'")
-                            continue
-
-                    author = result_author
+                        if author_is_drastic:
+                            logger.debug(f"BookDB API: Series match but keeping original author '{author}' (API had '{result_author}')")
+                            # Don't change author
+                        else:
+                            author = result_author
+                    else:
+                        author = result_author
                     if ',' in author and author.count(',') == 1:
                         parts = author.split(',')
                         author = f"{parts[1].strip()} {parts[0].strip()}"
