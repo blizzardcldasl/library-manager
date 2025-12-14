@@ -2,13 +2,41 @@
 
 Thanks for your interest in contributing! Here's how to get started.
 
+## Branch Strategy
+
+```
+main     = stable releases (Docker builds from here)
+develop  = active development (PRs merge here)
+feature/ = your feature branches
+```
+
+**All PRs should target `develop`**, not main. We merge develop → main for releases.
+
 ## Getting Started
 
 1. Fork the repo
-2. Create a feature branch: `git checkout -b feature/my-feature`
-3. Make your changes
-4. Test thoroughly (see below)
-5. Submit a PR
+2. Clone and set upstream:
+   ```bash
+   git clone https://github.com/YOUR_USERNAME/library-manager.git
+   git remote add upstream https://github.com/deucebucket/library-manager.git
+   ```
+3. Create feature branch from develop:
+   ```bash
+   git checkout develop
+   git pull upstream develop
+   git checkout -b feature/my-feature
+   ```
+4. Make your changes
+5. Test thoroughly (see below)
+6. Push and create PR to `develop`
+
+## Staying Updated
+
+Before submitting your PR:
+```bash
+git fetch upstream
+git rebase upstream/develop
+```
 
 ## Development Setup
 
