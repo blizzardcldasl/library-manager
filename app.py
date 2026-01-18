@@ -7681,7 +7681,7 @@ def api_manual_match():
     c = conn.cursor()
 
     # Get the queue item
-    c.execute('SELECT * FROM processing_queue WHERE id = ?', (queue_id,))
+    c.execute('SELECT * FROM queue WHERE id = ?', (queue_id,))
     item = c.fetchone()
     if not item:
         conn.close()
@@ -7737,7 +7737,7 @@ def api_manual_match():
     ''', (old_path, old_path, new_path, old_author, new_author, old_title, new_title))
 
     # Remove from queue
-    c.execute('DELETE FROM processing_queue WHERE id = ?', (queue_id,))
+    c.execute('DELETE FROM queue WHERE id = ?', (queue_id,))
 
     conn.commit()
     conn.close()
