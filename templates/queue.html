@@ -529,6 +529,124 @@ function editItem(queueId, author, title) {
     log(`Editing item ${queueId}: ${author} - ${title}`);
 }
 
+function searchAudnexusASIN() {
+    const asin = document.getElementById('audnexus-asin').value.trim().toUpperCase();
+    const region = document.getElementById('audnexus-region').value;
+    const resultDiv = document.getElementById('audnexus-result');
+    const resultContent = document.getElementById('audnexus-result-content');
+    const searchBtn = document.getElementById('search-audnexus-btn');
+    
+    if (!asin) {
+        showWarning('Please enter an ASIN', 'ASIN Required');
+        return;
+    }
+    
+    // Validate ASIN format
+    if (!/^[B0-9][A-Z0-9]{9}$/.test(asin)) {
+        showError('Invalid ASIN format. ASIN must be exactly 10 alphanumeric characters (e.g., B002V5H8FK)', 'Invalid ASIN');
+        return;
+    }
+    
+    // Show loading state
+    searchBtn.disabled = true;
+    resultContent.innerHTML = '<div class="text-center py-2 text-muted"><div class="spinner-border spinner-border-sm me-2"></div>Looking up ASIN...</div>';
+    resultDiv.style.display = 'block';
+    
+    const searchUrl = `/api/search_audnexus_asin?asin=${encodeURIComponent(asin)}&region=${encodeURIComponent(region)}`;
+    
+    fetch(searchUrl)
+        .then(r => r.json())
+        .then(data => {
+            searchBtn.disabled = false;
+            
+            if (data.error) {
+                resultContent.innerHTML = `<div class="alert alert-danger">${escapeHtml(data.error)}</div>`;
+                return;
+            }
+            
+            if (!data.success || !data.result) {
+                resultContent.innerHTML = `<div class="alert alert-warning">${escapeHtml(data.error || 'No book found for this ASIN')}</div>`;
+                return;
+            }
+            
+            const book = data.result;
+            const series = book.series ? ` (${book.series}${book.series_position ? ' #' + book.series_position : ''})` : '';
+            const year = book.year ? ` <span class="text-muted">(${book.year})</span>` : '';
+            const narrator = book.narrator ? ` <small class="text-info">Narrated by ${book.narrator}</small>` : '';
+            const regionNote = data.note ? `<div class="text-warning small mb-2"><i class="bi bi-info-circle"></i> ${escapeHtml(data.note)}</div>` : '';
+            
+            resultContent.innerHTML = `
+                ${regionNote}
+                <div class="list-group">
+                    <a href="#" class="list-group-item list-group-item-action bg-dark text-light"
+                       onclick="selectAudnexusResult(); return false;">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div class="flex-grow-1">
+                                <div class="fw-bold">${escapeHtml(book.title)}</div>
+                                <div class="text-info">${escapeHtml(book.author)}${year}</div>
+                                ${series ? `<div class="text-warning small">${escapeHtml(series)}</div>` : ''}
+                                ${narrator}
+                                <div class="text-muted small mt-1">ASIN: ${escapeHtml(book.asin || asin)} | Region: ${data.region.toUpperCase()}</div>
+                            </div>
+                            <span class="badge bg-primary ms-2">Audnexus</span>
+                        </div>
+                    </a>
+                </div>
+            `;
+            
+            // Store result for selection
+            window._audnexusResult = book;
+            
+            log(`Audnexus found: ${book.author} - ${book.title} (ASIN: ${book.asin || asin})`);
+        })
+        .catch(e => {
+            searchBtn.disabled = false;
+            resultContent.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(e.toString())}</div>`;
+            log('Audnexus ASIN lookup error: ' + e);
+        });
+}
+
+function selectAudnexusResult() {
+    if (!window._audnexusResult) {
+        return;
+    }
+    
+    const book = window._audnexusResult;
+    
+    // Fill in the form fields
+    if (book.author) {
+        document.getElementById('edit-author').value = book.author;
+    }
+    if (book.title) {
+        document.getElementById('edit-title').value = book.title;
+    }
+    
+    // Store selected result (use same format as BookBucket for compatibility)
+    selectedBookDBResult = {
+        author_name: book.author,
+        name: book.title,
+        title: book.title,
+        series_name: book.series,
+        series_position: book.series_position,
+        year_published: book.year,
+        narrator: book.narrator,
+        source: 'audnexus',
+        asin: book.asin
+    };
+    
+    // Show selected match
+    const matchDiv = document.getElementById('selected-match');
+    const matchText = document.getElementById('selected-match-text');
+    const series = book.series ? ` (${book.series}${book.series_position ? ' #' + book.series_position : ''})` : '';
+    matchText.textContent = `${book.author || 'Unknown'} - ${book.title || 'Unknown'}${series} [Audnexus]`;
+    matchDiv.classList.remove('d-none');
+    
+    // Hide search results
+    document.getElementById('audnexus-result').style.display = 'none';
+    
+    log(`Selected from Audnexus: ${book.author} - ${book.title}`);
+}
+
 function searchAllAPIs() {
     const query = document.getElementById('search-query').value.trim();
     const author = document.getElementById('edit-author').value.trim();
