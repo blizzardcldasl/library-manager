@@ -7188,6 +7188,53 @@ def api_abs_remove_exclude():
 # Use the public BookBucket API - same as metadata pipeline
 # No API key required - the search endpoints are public
 
+@app.route('/api/search_audnexus_asin')
+def api_search_audnexus_asin():
+    """Search Audnexus API using ASIN for manual metadata lookup."""
+    asin = request.args.get('asin', '').strip().upper()
+    region = request.args.get('region', 'us').strip().lower()
+    
+    if not asin:
+        return jsonify({'error': 'ASIN is required', 'result': None})
+    
+    # Validate ASIN format (10 alphanumeric characters)
+    if not re.match(r'^[B0-9][A-Z0-9]{9}$', asin):
+        return jsonify({'error': 'Invalid ASIN format. ASIN must be 10 alphanumeric characters (e.g., B002V5H8FK)', 'result': None})
+    
+    try:
+        result = search_audnexus(title=None, author=None, asin=asin, region=region)
+        
+        if result:
+            return jsonify({
+                'success': True,
+                'result': result,
+                'asin': asin,
+                'region': region
+            })
+        else:
+            # Try US region as fallback if different region was requested
+            if region != 'us':
+                logger.debug(f"Trying US region as fallback for ASIN {asin}")
+                result = search_audnexus(title=None, author=None, asin=asin, region='us')
+                if result:
+                    return jsonify({
+                        'success': True,
+                        'result': result,
+                        'asin': asin,
+                        'region': 'us',
+                        'note': f'Book not available in {region.upper()}, using US region'
+                    })
+            
+            return jsonify({
+                'success': False,
+                'error': f'No book found for ASIN {asin} in region {region.upper()}',
+                'result': None
+            })
+    except Exception as e:
+        logger.warning(f"Audnexus ASIN lookup error: {e}")
+        return jsonify({'error': str(e), 'result': None})
+
+
 @app.route('/api/search_all_apis')
 def api_search_all_apis():
     """Search all metadata APIs (Audnexus, OpenLibrary, Google Books, Hardcover, BookBucket) and return results grouped by source."""

@@ -130,6 +130,37 @@
 
                 <hr class="text-muted">
 
+                <!-- Audnexus ASIN Search -->
+                <div class="mb-3">
+                    <label class="form-label"><i class="bi bi-upc"></i> Audnexus ASIN Lookup</label>
+                    <div class="input-group mb-2">
+                        <input type="text" class="form-control bg-dark text-light" id="audnexus-asin" placeholder="Enter ASIN (e.g., B002V5H8FK)" maxlength="10" style="text-transform: uppercase;">
+                        <select class="form-select bg-dark text-light" id="audnexus-region" style="max-width: 100px;">
+                            <option value="us">US</option>
+                            <option value="uk">UK</option>
+                            <option value="au">AU</option>
+                            <option value="ca">CA</option>
+                            <option value="de">DE</option>
+                            <option value="es">ES</option>
+                            <option value="fr">FR</option>
+                            <option value="in">IN</option>
+                            <option value="it">IT</option>
+                            <option value="jp">JP</option>
+                        </select>
+                        <button class="btn btn-outline-primary" type="button" onclick="searchAudnexusASIN()" id="search-audnexus-btn">
+                            <i class="bi bi-search"></i> Lookup ASIN
+                        </button>
+                    </div>
+                    <small class="text-muted">Enter Audible ASIN (10 characters) to fetch metadata from Audnexus</small>
+                </div>
+
+                <!-- Audnexus Result -->
+                <div id="audnexus-result" class="mb-3" style="display: none;">
+                    <div id="audnexus-result-content"></div>
+                </div>
+
+                <hr class="text-muted">
+
                 <!-- Search All APIs -->
                 <div class="mb-3">
                     <label class="form-label"><i class="bi bi-search"></i> Search All Metadata Sources</label>
@@ -142,7 +173,7 @@
                             <i class="bi bi-database"></i> BookBucket Only
                         </button>
                     </div>
-                    <small class="text-muted">Searches: Audnexus, OpenLibrary, Google Books, Hardcover, and BookBucket</small>
+                    <small class="text-muted">Searches: OpenLibrary, Google Books, Hardcover, and BookBucket</small>
                 </div>
 
                 <!-- Search Status -->
