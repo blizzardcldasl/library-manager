@@ -1,5 +1,8 @@
 # Contributing to Library Manager
 
+> **Note:** This is a fork of [deucebucket/library-manager](https://github.com/deucebucket/library-manager).  
+> See [FORK_NOTES.md](FORK_NOTES.md) for fork-specific changes.
+
 Thanks for your interest in contributing! Here's how to get started.
 
 ## Branch Strategy

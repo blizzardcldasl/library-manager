@@ -4,13 +4,26 @@
 
 **Smart Audiobook Library Organizer with Multi-Source Metadata & AI Verification**
 
-[![Version](https://img.shields.io/badge/version-0.9.0--beta.27-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.9.0--beta.27--fork.1-blue.svg)](CHANGELOG.md)
+[![Fork](https://img.shields.io/badge/fork-of%20deucebucket%2Flibrary--manager-orange.svg)](https://github.com/deucebucket/library-manager)
 [![Docker](https://img.shields.io/badge/docker-ghcr.io-blue.svg)](https://ghcr.io/deucebucket/library-manager)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
 
 *Automatically fix messy audiobook folders using real book databases + AI intelligence*
 
 </div>
+
+---
+
+## 📌 Fork Notice
+
+> **This is a fork/line of the original [deucebucket/library-manager](https://github.com/deucebucket/library-manager) project.**
+
+This fork includes enhancements and modifications. See [FORK_NOTES.md](FORK_NOTES.md) for details on changes made in this fork.
+
+**Original Project:** [deucebucket/library-manager](https://github.com/deucebucket/library-manager)  
+**Original Author:** deucebucket  
+**License:** MIT (preserved from original)
 
 ---
 
@@ -286,11 +299,22 @@ Pull requests welcome! Ideas:
 
 ## Support & Contact
 
-- **Issues/Bugs:** [GitHub Issues](https://github.com/deucebucket/library-manager/issues)
-- **Email:** hello@deucebucket.com
+- **Original Project Issues:** [GitHub Issues](https://github.com/deucebucket/library-manager/issues)
+- **Original Author Email:** hello@deucebucket.com
+- **Fork Changes:** See [FORK_NOTES.md](FORK_NOTES.md) for details on this fork
+
+---
+
+## Attribution
+
+This project is a fork of [deucebucket/library-manager](https://github.com/deucebucket/library-manager).
+
+**Original Project:** [deucebucket/library-manager](https://github.com/deucebucket/library-manager)  
+**Original Author:** deucebucket  
+**Fork Enhancements:** See [FORK_NOTES.md](FORK_NOTES.md)
 
 ---
 
 ## License
 
-MIT License
+MIT License - Preserved from original project

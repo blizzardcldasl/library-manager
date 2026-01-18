@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+
+{% block title %}Empty Folders - Library Manager{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col">
+        <h2><i class="bi bi-folder-x"></i> Empty Folders</h2>
+        <p class="text-muted">Book folders that don't contain any audio files (.mp3, .m4b, .m4a)</p>
+    </div>
+    <div class="col-auto">
+        <button class="btn btn-primary" onclick="refreshEmptyFolders()">
+            <i class="bi bi-arrow-clockwise"></i> Refresh
+        </button>
+        <button class="btn btn-danger ms-2" onclick="deleteAll()" id="delete-all-btn" disabled>
+            <i class="bi bi-trash"></i> Delete All
+        </button>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-exclamation-triangle text-warning"></i> Found <span id="empty-count">0</span> empty folder(s)</span>
+        <small class="text-muted">These folders will be permanently deleted</small>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th style="width: 25%">Author</th>
+                        <th style="width: 35%">Title</th>
+                        <th style="width: 30%">Path</th>
+                        <th style="width: 10%">Action</th>
+                    </tr>
+                </thead>
+                <tbody id="empty-table">
+                    <tr>
+                        <td colspan="4" class="text-center py-4">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <p class="mt-2 mb-0 text-muted">Scanning for empty folders...</p>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+let emptyFolderData = [];
+
+function refreshEmptyFolders() {
+    document.getElementById('empty-table').innerHTML = `
+        <tr>
+            <td colspan="4" class="text-center py-4">
+                <div class="spinner-border text-primary" role="status"></div>
+                <p class="mt-2 mb-0 text-muted">Scanning for empty folders...</p>
+            </td>
+        </tr>
+    `;
+
+    fetch('/api/empty_folders')
+        .then(r => r.json())
+        .then(data => {
+            emptyFolderData = data.folders;
+            document.getElementById('empty-count').textContent = data.count;
+            document.getElementById('delete-all-btn').disabled = data.count === 0;
+
+            if (data.count === 0) {
+                document.getElementById('empty-table').innerHTML = `
+                    <tr>
+                        <td colspan="4" class="text-center py-4 text-success">
+                            <i class="bi bi-check-circle fs-1"></i>
+                            <p class="mt-2 mb-0">No empty folders found! All book folders contain audio files.</p>
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            let html = '';
+            data.folders.forEach((folder, idx) => {
+                const pathParts = folder.path.split('/');
+                const displayPath = pathParts.length > 3 
+                    ? '.../' + pathParts.slice(-2).join('/')
+                    : folder.path;
+
+                html += `
+                    <tr>
+                        <td>
+                            <i class="bi bi-person"></i> ${escapeHtml(folder.author)}
+                        </td>
+                        <td>
+                            <i class="bi bi-book"></i> ${escapeHtml(folder.title)}
+                        </td>
+                        <td>
+                            <small class="text-muted font-monospace">${escapeHtml(displayPath)}</small>
+                        </td>
+                        <td>
+                            <button class="btn btn-sm btn-danger" onclick="deleteFolder(${folder.id}, ${idx})" title="Delete this empty folder">
+                                <i class="bi bi-trash"></i> Delete
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            document.getElementById('empty-table').innerHTML = html;
+        })
+        .catch(e => {
+            document.getElementById('empty-table').innerHTML = `
+                <tr>
+                    <td colspan="4" class="text-center py-4 text-danger">
+                        <i class="bi bi-exclamation-triangle fs-1"></i>
+                        <p class="mt-2 mb-0">Error loading empty folders: ${e}</p>
+                    </td>
+                </tr>
+            `;
+        });
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function deleteFolder(folderId, idx) {
+    const folder = emptyFolderData[idx];
+    if (!folder) return;
+
+    const folderName = folder.title || folder.path.split('/').pop();
+    if (!confirm(`Delete empty folder:\n${folder.author}/${folderName}\n\nThis action cannot be undone!`)) {
+        return;
+    }
+
+    fetch(`/api/empty_folders/delete/${folderId}`, {
+        method: 'POST'
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            refreshEmptyFolders();
+        } else {
+            alert('Error: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(e => alert('Error: ' + e));
+}
+
+function deleteAll() {
+    if (emptyFolderData.length === 0) return;
+
+    const count = emptyFolderData.length;
+    if (!confirm(`Delete ALL ${count} empty folder(s)?\n\nThis action cannot be undone!\n\nAll folders will be permanently deleted.`)) {
+        return;
+    }
+
+    document.getElementById('delete-all-btn').disabled = true;
+    document.getElementById('delete-all-btn').innerHTML = '<span class="spinner-border spinner-border-sm"></span> Deleting...';
+
+    fetch('/api/empty_folders/delete_all', {
+        method: 'POST'
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            let msg = `Deleted: ${data.deleted}\nErrors: ${data.errors}`;
+            if (data.details && data.details.length > 0) {
+                msg += '\n\n' + data.details.slice(0, 10).join('\n');
+                if (data.details.length > 10) {
+                    msg += `\n... and ${data.details.length - 10} more`;
+                }
+            }
+            alert(msg);
+            refreshEmptyFolders();
+        } else {
+            alert('Error: ' + (data.error || 'Unknown error'));
+            document.getElementById('delete-all-btn').disabled = false;
+            document.getElementById('delete-all-btn').innerHTML = '<i class="bi bi-trash"></i> Delete All';
+        }
+    })
+    .catch(e => {
+        alert('Error: ' + e);
+        document.getElementById('delete-all-btn').disabled = false;
+        document.getElementById('delete-all-btn').innerHTML = '<i class="bi bi-trash"></i> Delete All';
+    });
+}
+
+// Load on page load
+refreshEmptyFolders();
+</script>
+{% endblock %}

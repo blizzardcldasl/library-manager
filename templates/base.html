@@ -302,6 +302,11 @@
                         </a>
                     </li>
                     <li class="nav-item">
+                        <a class="nav-link {% if request.path == '/empty_folders' %}active{% endif %}" href="/empty_folders">
+                            <i class="bi bi-folder-x"></i> Empty Folders
+                        </a>
+                    </li>
+                    <li class="nav-item">
                         <a class="nav-link {% if request.path == '/abs' %}active{% endif %}" href="/abs">
                             <i class="bi bi-headphones"></i> ABS
                         </a>

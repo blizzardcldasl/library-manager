@@ -11,8 +11,9 @@ Features:
 - Multi-provider AI (Gemini, OpenRouter, Ollama)
 """
 
-APP_VERSION = "0.9.0-beta.27"
-GITHUB_REPO = "deucebucket/library-manager"  # Your GitHub repo
+APP_VERSION = "0.9.0-beta.27-fork.1"
+GITHUB_REPO = "deucebucket/library-manager"  # Original GitHub repo
+# This is a fork - see FORK_NOTES.md for changes
 
 # Versioning Guide:
 # 0.9.0-beta.1  = Initial beta (basic features)
@@ -1858,6 +1859,12 @@ import hashlib
 AUDIO_EXTENSIONS = {'.m4b', '.mp3', '.m4a', '.flac', '.ogg', '.opus', '.wma', '.aac'}
 EBOOK_EXTENSIONS = {'.epub', '.pdf', '.mobi', '.azw3'}
 
+# Metadata file extensions/patterns - these don't count as "content" files
+METADATA_EXTENSIONS = {'.nfo', '.txt', '.xml', '.json', '.jpg', '.jpeg', '.png', '.gif', '.webp'}
+METADATA_FILENAMES = {'metadata.json', 'info.json', 'audiobook.json', 'desc.txt', 'description.txt', 
+                      'readme.txt', 'cover.jpg', 'cover.png', 'folder.jpg', 'folder.png', 'thumb.jpg', 
+                      'thumb.png', '.nfo', 'metadata.xml', 'info.xml'}
+
 # Patterns for disc/chapter folders (these are NOT book titles)
 DISC_CHAPTER_PATTERNS = [
     r'^(disc|disk|cd|part|chapter|ch)\s*\d+',  # "Disc 1", "Part 2", "Chapter 3"
@@ -2760,6 +2767,23 @@ def clean_title(title):
     return cleaned, issues
 
 
+def looks_like_person_name(name):
+    """Check if name looks like a person's name (First Last pattern)."""
+    patterns = [
+        r'^[A-Z][a-z]+\s+[A-Z][a-z]+$',           # First Last
+        r'^[A-Z][a-z]+\s+[A-Z][a-z]+\s+[A-Z][a-z]+$',  # First Middle Last
+        r'^[A-Z]\.\s*[A-Z][a-z]+$',               # F. Last
+        r'^[A-Z][a-z]+\s+[A-Z]\.\s*[A-Z][a-z]+$', # First M. Last
+        r'^[A-Z][a-z]+,\s+[A-Z][a-z]+$',          # Last, First
+        r'^[A-Z]\.([A-Z]\.)+\s*[A-Z][a-z]+$',     # J.R.R. Tolkien
+        r'^[A-Z][a-z]+\s+[A-Z]\.([A-Z]\.)+\s*[A-Z][a-z]+$',  # George R.R. Martin
+        r'^[A-Z][a-z]+\s+[A-Z]\.[A-Z]\.\s*[A-Z][a-z]+$',     # Brandon R.R. Author
+        r'^[A-Z][a-z]+\s+[A-Z]\.\s*(Le|De|Von|Van|La|Du)\s+[A-Z][a-z]+$',  # Ursula K. Le Guin
+        r'^[A-Z][a-z]+\s+(Le|De|Von|Van|La|Du)\s+[A-Z][a-z]+$',  # Anne De Vries
+    ]
+    return any(re.match(p, name) for p in patterns)
+
+
 def analyze_full_path(audio_file_path, library_root):
     """
     Analyze the COMPLETE path from library root to audio file.
@@ -2802,18 +2826,6 @@ def analyze_full_path(audio_file_path, library_root):
     # Classify each folder from BOTTOM to TOP
     folder_roles = {}
     issues = []
-
-    def looks_like_person_name(name):
-        """Check if name looks like a person's name (First Last pattern)."""
-        patterns = [
-            r'^[A-Z][a-z]+\s+[A-Z][a-z]+$',           # First Last
-            r'^[A-Z][a-z]+\s+[A-Z][a-z]+\s+[A-Z][a-z]+$',  # First Middle Last
-            r'^[A-Z]\.\s*[A-Z][a-z]+$',               # F. Last
-            r'^[A-Z][a-z]+\s+[A-Z]\.\s*[A-Z][a-z]+$', # First M. Last
-            r'^[A-Z][a-z]+,\s+[A-Z][a-z]+$',          # Last, First
-            r'^[A-Z]\.([A-Z]\.)+\s*[A-Z][a-z]+$',     # J.R.R. Tolkien
-        ]
-        return any(re.match(p, name) for p in patterns)
 
     def looks_like_disc_chapter(name):
         """Check if folder is a disc/chapter/part folder (not meaningful for title)."""
@@ -3355,10 +3367,13 @@ def analyze_title(title, author):
     if re.search(r'\[\d{4,}\]', title):
         issues.append("catalog_id_in_title")
 
-    # Title looks like author name (just 2 capitalized words)
-    title_words = title.split()
-    if len(title_words) == 2 and all(w[0].isupper() for w in title_words if w):
-        if not any(w.lower() in ['the', 'a', 'of', 'and'] for w in title_words):
+    # Title looks like author name - use comprehensive name pattern matching
+    if looks_like_person_name(title):
+        # Additional check: exclude common title words that might match name patterns
+        title_lower = title.lower()
+        common_title_words = ['the', 'a', 'of', 'and', 'in', 'to', 'for', 'book', 'series', 'volume']
+        # Only flag if it doesn't contain obvious title words
+        if not any(word in title_lower for word in common_title_words):
             issues.append("title_looks_like_author")
 
     return issues
@@ -3439,6 +3454,441 @@ def get_file_signature(filepath, sample_size=8192):
         return f"{size}_{partial_hash}"
     except:
         return None
+
+
+def verify_file_matches_folder(audio_file, folder_author, folder_title):
+    """
+    Verify that audio file metadata matches the folder structure.
+    Returns: (matches: bool, issues: list, confidence: str)
+    """
+    metadata = read_audio_metadata(audio_file)
+    if not metadata:
+        return (None, ['no_metadata_in_file'], 'low')  # Can't verify without metadata
+    
+    issues = []
+    matches = True
+    confidence = 'medium'
+    
+    # Common words to ignore in comparison
+    common_words = {'the', 'a', 'an', 'and', 'or', 'of', 'in', 'on', 'at', 'to', 'for'}
+    
+    # Normalize names for comparison (lowercase, remove extra spaces)
+    def normalize_name(name):
+        if not name:
+            return ''
+        return re.sub(r'\s+', ' ', name.lower().strip())
+    
+    # Check album (usually book title) vs folder title
+    if 'album' in metadata:
+        album_normalized = normalize_name(metadata['album'])
+        title_normalized = normalize_name(folder_title)
+        
+        # Calculate similarity
+        if album_normalized and title_normalized:
+            # Simple word overlap check
+            album_words = set(album_normalized.split())
+            title_words = set(title_normalized.split())
+            
+            # Remove common words
+            album_words -= common_words
+            title_words -= common_words
+            
+            if album_words and title_words:
+                overlap = len(album_words & title_words) / max(len(album_words), len(title_words))
+                if overlap < 0.3:  # Less than 30% word overlap
+                    issues.append(f'file_title_mismatch:file={metadata["album"]},folder={folder_title}')
+                    matches = False
+                    confidence = 'low'
+                elif overlap < 0.6:
+                    confidence = 'medium'
+                else:
+                    confidence = 'high'
+    
+    # Check artist/albumartist (usually author) vs folder author
+    author_from_file = metadata.get('albumartist') or metadata.get('artist')
+    if author_from_file:
+        author_normalized = normalize_name(author_from_file)
+        folder_author_normalized = normalize_name(folder_author)
+        
+        if author_normalized and folder_author_normalized:
+            # Check if names match (allowing for variations)
+            author_words = set(author_normalized.split())
+            folder_words = set(folder_author_normalized.split())
+            
+            # Remove common words
+            author_words -= common_words
+            folder_words -= common_words
+            
+            if author_words and folder_words:
+                overlap = len(author_words & folder_words) / max(len(author_words), len(folder_words))
+                if overlap < 0.4:  # Less than 40% word overlap for author names
+                    issues.append(f'file_author_mismatch:file={author_from_file},folder={folder_author}')
+                    matches = False
+                    confidence = 'low'
+                elif overlap < 0.7:
+                    confidence = 'medium'
+                else:
+                    confidence = 'high'
+    
+    return (matches, issues, confidence)
+
+
+def calculate_name_similarity(name1, name2):
+    """Calculate similarity between two names (0.0 to 1.0)."""
+    if not name1 or not name2:
+        return 0.0
+    
+    def normalize(name):
+        return re.sub(r'\s+', ' ', name.lower().strip())
+    
+    n1 = normalize(name1)
+    n2 = normalize(name2)
+    
+    if n1 == n2:
+        return 1.0
+    
+    # Word-based similarity
+    words1 = set(n1.split())
+    words2 = set(n2.split())
+    
+    # Remove common words
+    common_words = {'the', 'a', 'an', 'and', 'or', 'of', 'in', 'on', 'at', 'to', 'for'}
+    words1 -= common_words
+    words2 -= common_words
+    
+    if not words1 or not words2:
+        return 0.0
+    
+    intersection = len(words1 & words2)
+    union = len(words1 | words2)
+    
+    return intersection / union if union > 0 else 0.0
+
+
+def scan_folder_recursive(folder_path, library_root, config, conn, c, 
+                          author_context=None, series_context=None, depth=0, max_depth=5):
+    """
+    Recursively scan folder structure at any depth.
+    Handles: Author/Title, Author/Series/Book, Author/Series/Book/Subfolders, etc.
+    
+    Returns: (scanned_count, queued_count, issues_found_dict)
+    """
+    scanned = 0
+    queued = 0
+    issues_found = {}
+    
+    if depth > max_depth:
+        logger.warning(f"Max depth {max_depth} reached at {folder_path}, skipping")
+        return scanned, queued, issues_found
+    
+    folder_name = folder_path.name
+    path_str = str(folder_path)
+    
+    # Skip system folders
+    system_folders = {'metadata', 'tmp', 'temp', 'cache', 'config', 'data', 'logs', 'log',
+                      'backup', 'backups', 'old', 'new', 'test', 'tests', 'sample', 'samples',
+                      '.thumbnails', 'thumbnails', 'covers', 'images', 'artwork', 'art',
+                      'extras', 'bonus', 'misc', 'other', 'various', 'unknown', 'unsorted',
+                      'downloads', 'incoming', 'processing', 'completed', 'done', 'failed',
+                      'streams', 'chapters', 'parts', '.streams', '.cache', '.metadata', '@eaDir', '#recycle'}
+    
+    if folder_name.lower() in system_folders or folder_name.startswith('.') or folder_name.startswith('@'):
+        logger.debug(f"Skipping system folder: {path_str}")
+        return scanned, queued, issues_found
+    
+    # Skip disc/chapter folders
+    if is_disc_chapter_folder(folder_name):
+        logger.debug(f"Skipping disc/chapter folder: {path_str}")
+        return scanned, queued, issues_found
+    
+    # Get all items in this folder
+    try:
+        items = list(folder_path.iterdir())
+    except PermissionError:
+        logger.warning(f"Permission denied: {path_str}")
+        return scanned, queued, issues_found
+    except Exception as e:
+        logger.warning(f"Error reading folder {path_str}: {e}")
+        return scanned, queued, issues_found
+    
+    # Separate files and directories
+    subdirs = [item for item in items if item.is_dir()]
+    files = [item for item in items if item.is_file()]
+    
+    # Find audio files in this folder (recursively)
+    audio_files = [f for f in folder_path.rglob('*') if f.is_file() and f.suffix.lower() in AUDIO_EXTENSIONS]
+    # But only count direct audio files for structure analysis
+    direct_audio = [f for f in files if f.suffix.lower() in AUDIO_EXTENSIONS]
+    
+    # Determine what this folder represents based on context and content
+    # Depth 0 = library root, Depth 1 = likely author, Depth 2+ = series/book/title
+    
+    if depth == 0:
+        # Library root - scan all subdirectories
+        for subdir in subdirs:
+            s, q, i = scan_folder_recursive(subdir, library_root, config, conn, c, 
+                                            author_context=None, series_context=None, 
+                                            depth=depth+1, max_depth=max_depth)
+            scanned += s
+            queued += q
+            issues_found.update(i)
+        return scanned, queued, issues_found
+    
+    elif depth == 1:
+        # Likely an author folder
+        author = folder_name
+        author_issues = analyze_author(author)
+        
+        # Check if author folder has audio files directly (orphan files)
+        if direct_audio:
+            issues_found[path_str] = author_issues + ["author_folder_has_audio_files"]
+            logger.warning(f"Author folder has audio files directly: {author}")
+        
+        # Recursively scan subdirectories (could be books or series)
+        for subdir in subdirs:
+            s, q, i = scan_folder_recursive(subdir, library_root, config, conn, c,
+                                            author_context=author, series_context=None,
+                                            depth=depth+1, max_depth=max_depth)
+            scanned += s
+            queued += q
+            issues_found.update(i)
+        
+        return scanned, queued, issues_found
+    
+    else:
+        # Depth 2+ - could be series, book title, or nested structure
+        folder_title = folder_name
+        
+        # Check if this looks like a series folder (has multiple numbered book subfolders)
+        if len(subdirs) >= 2:
+            book_folder_patterns = [
+                r'^\d+\s*[-–—:.]?\s*\w', r'^#?\d+\s*[-–—:]',
+                r'book\s*\d+', r'vol(ume)?\s*\d+', r'part\s*\d+'
+            ]
+            book_like_count = sum(
+                1 for d in subdirs
+                if any(re.search(p, d.name, re.IGNORECASE) for p in book_folder_patterns)
+            )
+            
+            if book_like_count >= 2:
+                # This is a series folder - recurse into it
+                logger.debug(f"Detected series folder: {path_str} (contains {book_like_count} book subfolders)")
+                for subdir in subdirs:
+                    s, q, i = scan_folder_recursive(subdir, library_root, config, conn, c,
+                                                    author_context=author_context,
+                                                    series_context=folder_title,
+                                                    depth=depth+1, max_depth=max_depth)
+                    scanned += s
+                    queued += q
+                    issues_found.update(i)
+                
+                # Mark series folder in database
+                c.execute('SELECT id FROM books WHERE path = ?', (path_str,))
+                existing = c.fetchone()
+                if existing:
+                    c.execute('UPDATE books SET status = ? WHERE id = ?', ('series_folder', existing['id']))
+                else:
+                    c.execute('''INSERT INTO books (path, current_author, current_title, status)
+                                 VALUES (?, ?, ?, 'series_folder')''',
+                             (path_str, author_context or 'Unknown', folder_title))
+                conn.commit()
+                return scanned, queued, issues_found
+        
+        # This appears to be a book folder (has audio files or is leaf node)
+        # Analyze the folder structure
+        title_issues = analyze_title(folder_title, author_context or 'Unknown')
+        cleaned_title, clean_issues = clean_title(folder_title)
+        
+        author_issues = analyze_author(author_context) if author_context else []
+        all_issues = author_issues + title_issues + clean_issues
+        
+        # Check for reversed structure (if we have author context)
+        if author_context:
+            author_looks_like_title = any(i in author_issues for i in [
+                'year_in_author', 'title_words_in_author', 'author_contains_book_number',
+                'not_a_name_pattern', 'author_starts_with_number'
+            ])
+            if not looks_like_person_name(author_context):
+                author_looks_like_title = True
+            
+            title_looks_like_author = 'title_looks_like_author' in title_issues
+            title_is_name_pattern = looks_like_person_name(folder_title)
+            
+            if author_looks_like_title and (title_looks_like_author or title_is_name_pattern):
+                all_issues = ['STRUCTURE_REVERSED'] + all_issues
+                logger.info(f"Detected reversed structure: '{author_context}' is title, '{folder_title}' is author")
+                
+                c.execute('SELECT id FROM books WHERE path = ?', (path_str,))
+                existing_rev = c.fetchone()
+                if existing_rev:
+                    c.execute('UPDATE books SET status = ? WHERE id = ?',
+                              ('structure_reversed', existing_rev['id']))
+                else:
+                    c.execute('''INSERT INTO books (path, current_author, current_title, status)
+                                 VALUES (?, ?, ?, 'structure_reversed')''',
+                             (path_str, author_context, folder_title))
+                conn.commit()
+                return scanned, queued, issues_found
+        
+        # Check for empty folder (no audio files, only metadata)
+        if not audio_files:
+            all_files = [f for f in folder_path.rglob('*') if f.is_file()]
+            content_files = []
+            ebook_management_enabled = config.get('ebook_management', False)
+            
+            for f in all_files:
+                is_metadata = (
+                    f.suffix.lower() in METADATA_EXTENSIONS or
+                    f.name.lower() in METADATA_FILENAMES or
+                    f.name.lower().endswith('.nfo')
+                )
+                is_ebook = f.suffix.lower() in EBOOK_EXTENSIONS
+                
+                if is_ebook and not ebook_management_enabled:
+                    content_files.append(f)
+                elif not is_metadata and not is_ebook:
+                    content_files.append(f)
+            
+            if len(content_files) == 0:
+                if not ebook_management_enabled or not [f for f in all_files if f.suffix.lower() in EBOOK_EXTENSIONS]:
+                    all_issues.append('empty_folder_no_audio')
+                    logger.info(f"Found empty book folder: {path_str}")
+                    
+                    c.execute('SELECT id FROM books WHERE path = ?', (path_str,))
+                    existing_empty = c.fetchone()
+                    if existing_empty:
+                        c.execute('UPDATE books SET status = ? WHERE id = ?',
+                                  ('empty_folder', existing_empty['id']))
+                    else:
+                        c.execute('''INSERT INTO books (path, current_author, current_title, status)
+                                     VALUES (?, ?, ?, 'empty_folder')''',
+                                 (path_str, author_context or 'Unknown', folder_title))
+                    conn.commit()
+                    return scanned, queued, issues_found
+        
+        # Check for multi-book files
+        if len(direct_audio) >= 2:
+            book_file_patterns = [
+                r'book\s*(\d+)', r'#(\d+)', r'^(\d+)\s*[-–—:.]',
+                r'[-_\s](\d+)[-_\s.]', r'volume\s*(\d+)', r'vol\.?\s*(\d+)'
+            ]
+            book_numbers_found = set()
+            for f in direct_audio:
+                for pattern in book_file_patterns:
+                    match = re.search(pattern, f.stem, re.IGNORECASE)
+                    if match:
+                        book_numbers_found.add(match.group(1))
+                        break
+            
+            if len(book_numbers_found) >= 2:
+                logger.info(f"Skipping multi-book collection: {path_str}")
+                c.execute('SELECT id FROM books WHERE path = ?', (path_str,))
+                existing = c.fetchone()
+                if existing:
+                    c.execute('UPDATE books SET status = ? WHERE id = ?', ('multi_book_files', existing['id']))
+                else:
+                    c.execute('''INSERT INTO books (path, current_author, current_title, status)
+                                 VALUES (?, ?, ?, 'multi_book_files')''',
+                             (path_str, author_context or 'Unknown', folder_title))
+                conn.commit()
+                return scanned, queued, issues_found
+        
+        # CRITICAL: Verify files match folder structure using metadata
+        file_mismatch_issues = []
+        if audio_files:
+            # Sample a few audio files to verify they match
+            sample_files = audio_files[:3]  # Check up to 3 files
+            mismatches = 0
+            total_checked = 0
+            
+            for audio_file in sample_files:
+                match_result, match_issues, confidence = verify_file_matches_folder(
+                    audio_file, author_context or 'Unknown', folder_title
+                )
+                total_checked += 1
+                
+                if match_result is False:  # Explicitly False (not None)
+                    mismatches += 1
+                    file_mismatch_issues.extend(match_issues)
+            
+            if mismatches > 0:
+                mismatch_rate = mismatches / total_checked
+                if mismatch_rate >= 0.5:  # 50% or more files don't match
+                    all_issues.append(f'file_folder_mismatch:{mismatch_rate:.0%}_files_dont_match')
+                    logger.warning(f"File-folder mismatch detected: {path_str} ({mismatches}/{total_checked} files)")
+        
+        # Check for nested disc folders
+        nested_dirs = [d for d in subdirs if is_disc_chapter_folder(d.name)]
+        if nested_dirs:
+            all_issues.append(f"has_{len(nested_dirs)}_disc_folders")
+        
+        # Check for ebooks
+        ebook_files = [f for f in folder_path.rglob('*') if f.is_file() and f.suffix.lower() in EBOOK_EXTENSIONS]
+        if ebook_files:
+            if audio_files:
+                all_issues.append(f"has_{len(ebook_files)}_ebook_files")
+            elif config.get('ebook_management', False):
+                all_issues.append('ebook_only_folder')
+        
+        # Store issues
+        if all_issues:
+            issues_found[path_str] = all_issues
+        
+        # Add to database
+        c.execute('SELECT id, status FROM books WHERE path = ?', (path_str,))
+        existing = c.fetchone()
+        
+        if existing:
+            if existing['status'] in ['verified', 'fixed']:
+                # Still recurse into subdirectories in case structure changed
+                for subdir in subdirs:
+                    s, q, i = scan_folder_recursive(subdir, library_root, config, conn, c,
+                                                    author_context=author_context,
+                                                    series_context=series_context,
+                                                    depth=depth+1, max_depth=max_depth)
+                    scanned += s
+                    queued += q
+                    issues_found.update(i)
+                return scanned, queued, issues_found
+            book_id = existing['id']
+        else:
+            c.execute('''INSERT INTO books (path, current_author, current_title, status)
+                         VALUES (?, ?, ?, 'pending')''',
+                     (path_str, author_context or 'Unknown', folder_title))
+            conn.commit()
+            book_id = c.lastrowid
+            scanned += 1
+        
+        # Add to queue if has issues
+        if all_issues:
+            if 'multi_book_collection' in all_issues:
+                c.execute('UPDATE books SET status = ? WHERE id = ?', ('needs_split', book_id))
+                conn.commit()
+                return scanned, queued, issues_found
+            
+            reason = "; ".join(all_issues[:3])
+            if len(all_issues) > 3:
+                reason += f" (+{len(all_issues)-3} more)"
+            
+            c.execute('SELECT id FROM queue WHERE book_id = ?', (book_id,))
+            if not c.fetchone():
+                c.execute('''INSERT INTO queue (book_id, reason, priority)
+                            VALUES (?, ?, ?)''',
+                         (book_id, reason, min(len(all_issues), 10)))
+                conn.commit()
+                queued += 1
+        
+        # Recurse into subdirectories (for nested structures)
+        for subdir in subdirs:
+            s, q, i = scan_folder_recursive(subdir, library_root, config, conn, c,
+                                            author_context=author_context,
+                                            series_context=series_context or folder_title,
+                                            depth=depth+1, max_depth=max_depth)
+            scanned += s
+            queued += q
+            issues_found.update(i)
+        
+        return scanned, queued, issues_found
 
 
 def deep_scan_library(config):
@@ -3555,225 +4005,15 @@ def deep_scan_library(config):
                     issues_found[path_str] = ['ebook_loose_file']
                     logger.info(f"Queued loose ebook: {filename}")
 
-        # Second pass: Analyze folder structure
-        for author_dir in lib_path.iterdir():
-            if not author_dir.is_dir():
-                continue
-
-            author = author_dir.name
-
-            # Skip system folders at author level - these are NEVER authors
-            author_system_folders = {'metadata', 'tmp', 'temp', 'cache', 'config', 'data', 'logs', 'log',
-                                     'backup', 'backups', 'old', 'new', 'test', 'tests', 'sample', 'samples',
-                                     '.thumbnails', 'thumbnails', 'covers', 'images', 'artwork', 'art',
-                                     'streams', '.streams', '.cache', '.metadata', '@eaDir', '#recycle'}
-            if author.lower() in author_system_folders or author.startswith('.') or author.startswith('@'):
-                logger.debug(f"Skipping system folder at author level: {author}")
-                continue
-
-            author_issues = analyze_author(author)
-
-            # Check if "author" folder is actually a book (has audio files directly)
-            direct_audio = [f for f in author_dir.iterdir()
-                          if f.is_file() and f.suffix.lower() in AUDIO_EXTENSIONS]
-            if direct_audio:
-                # This "author" folder might actually be a book!
-                issues_found[str(author_dir)] = author_issues + ["author_folder_has_audio_files"]
-                logger.warning(f"Author folder has audio files directly: {author}")
-
-            # Check if author folder has NO book subfolders (just disc folders)
-            subdirs = [d for d in author_dir.iterdir() if d.is_dir()]
-            if subdirs:
-                all_disc_folders = all(is_disc_chapter_folder(d.name) for d in subdirs)
-                if all_disc_folders:
-                    issues_found[str(author_dir)] = author_issues + ["author_folder_only_has_disc_folders"]
-
-            for title_dir in author_dir.iterdir():
-                if not title_dir.is_dir():
-                    continue
-
-                title = title_dir.name
-                path = str(title_dir)
-
-                # Skip if this looks like a disc/chapter folder
-                if is_disc_chapter_folder(title):
-                    # But flag the parent!
-                    issues_found[str(author_dir)] = issues_found.get(str(author_dir), []) + [f"has_disc_folder:{title}"]
-                    continue
-
-                # Skip system/metadata folders - these are NEVER books
-                system_folders = {'metadata', 'tmp', 'temp', 'cache', 'config', 'data', 'logs', 'log',
-                                  'backup', 'backups', 'old', 'new', 'test', 'tests', 'sample', 'samples',
-                                  '.thumbnails', 'thumbnails', 'covers', 'images', 'artwork', 'art',
-                                  'extras', 'bonus', 'misc', 'other', 'various', 'unknown', 'unsorted',
-                                  'downloads', 'incoming', 'processing', 'completed', 'done', 'failed',
-                                  'streams', 'chapters', 'parts', '.streams', '.cache', '.metadata'}
-                if title.lower() in system_folders or title.startswith('.'):
-                    logger.debug(f"Skipping system folder: {path}")
-                    continue
-
-                # Check if this is a SERIES folder containing multiple book subfolders
-                # If so, skip it - we should process the books inside, not the series folder itself
-                subdirs = [d for d in title_dir.iterdir() if d.is_dir()]
-                if len(subdirs) >= 2:
-                    # Count how many look like book folders (numbered, "Book N", etc.)
-                    book_folder_patterns = [
-                        r'^\d+\s*[-–—:.]?\s*\w',     # "01 Title", "1 - Title", "01. Title"
-                        r'^#?\d+\s*[-–—:]',          # "#1 - Title"
-                        r'book\s*\d+',               # "Book 1", "Book1"
-                        r'vol(ume)?\s*\d+',          # "Volume 1", "Vol 1"
-                        r'part\s*\d+',               # "Part 1"
-                    ]
-                    book_like_count = sum(
-                        1 for d in subdirs
-                        if any(re.search(p, d.name, re.IGNORECASE) for p in book_folder_patterns)
-                    )
-                    if book_like_count >= 2:
-                        # This is a series folder, not a book - skip it
-                        logger.info(f"Skipping series folder (contains {book_like_count} book subfolders): {path}")
-                        # Mark in database as series_folder so we don't keep checking it
-                        c.execute('SELECT id FROM books WHERE path = ?', (path,))
-                        existing = c.fetchone()
-                        if existing:
-                            c.execute('UPDATE books SET status = ? WHERE id = ?', ('series_folder', existing['id']))
-                        else:
-                            c.execute('''INSERT INTO books (path, current_author, current_title, status)
-                                         VALUES (?, ?, ?, 'series_folder')''', (path, author, title))
-                        conn.commit()
-                        continue
-
-                # Check if this folder contains multiple AUDIO FILES that look like different books
-                # (e.g., "Book 1.m4b", "Book 2.m4b" or "Necroscope Book 1.m4b", "Necroscope Book 2.m4b")
-                audio_files = [f for f in title_dir.iterdir()
-                               if f.is_file() and f.suffix.lower() in AUDIO_EXTENSIONS]
-                if len(audio_files) >= 2:
-                    # Check if filenames indicate different book numbers
-                    book_file_patterns = [
-                        r'book\s*(\d+)',           # "Book 1", "Book 2"
-                        r'#(\d+)',                 # "#1", "#2"
-                        r'^(\d+)\s*[-–—:.]',       # "01 - Title", "02 - Title"
-                        r'[-_\s](\d+)[-_\s.]',     # " 1 ", "_1_", "-1-"
-                        r'volume\s*(\d+)',         # "Volume 1"
-                        r'vol\.?\s*(\d+)',         # "Vol 1", "Vol. 1"
-                    ]
-                    book_numbers_found = set()
-                    for f in audio_files:
-                        for pattern in book_file_patterns:
-                            match = re.search(pattern, f.stem, re.IGNORECASE)
-                            if match:
-                                book_numbers_found.add(match.group(1))
-                                break
-
-                    if len(book_numbers_found) >= 2:
-                        # Multiple different book numbers found - this is a multi-book collection
-                        logger.info(f"Skipping multi-book collection (contains {len(book_numbers_found)} book files): {path}")
-                        c.execute('SELECT id FROM books WHERE path = ?', (path,))
-                        existing = c.fetchone()
-                        if existing:
-                            c.execute('UPDATE books SET status = ? WHERE id = ?', ('multi_book_files', existing['id']))
-                        else:
-                            c.execute('''INSERT INTO books (path, current_author, current_title, status)
-                                         VALUES (?, ?, ?, 'multi_book_files')''', (path, author, title))
-                        conn.commit()
-                        continue
-
-                # Analyze title
-                title_issues = analyze_title(title, author)
-                cleaned_title, clean_issues = clean_title(title)
-
-                all_issues = author_issues + title_issues + clean_issues
-
-                # CRITICAL: Detect REVERSED STRUCTURE (Series/Author instead of Author/Series)
-                # When: author folder looks like a title AND title folder looks like an author
-                author_looks_like_title = any(i in author_issues for i in [
-                    'year_in_author', 'title_words_in_author', 'author_contains_book_number',
-                    'not_a_name_pattern', 'author_starts_with_number'
-                ])
-                title_looks_like_author = 'title_looks_like_author' in title_issues
-
-                # Check if title folder is a proper name pattern (First Last)
-                title_is_name_pattern = bool(re.match(
-                    r'^[A-Z][a-z]+\s+[A-Z][a-z]+$|^[A-Z]\.\s*[A-Z][a-z]+$|^[A-Z][a-z]+,\s+[A-Z]',
-                    title
-                ))
-
-                if author_looks_like_title and (title_looks_like_author or title_is_name_pattern):
-                    # This is a reversed structure! Mark it specially
-                    all_issues = ['STRUCTURE_REVERSED'] + all_issues
-                    logger.info(f"Detected reversed structure: '{author}' is title, '{title}' is author")
-
-                    # Set status to 'structure_reversed' so we handle it differently
-                    c.execute('SELECT id FROM books WHERE path = ?', (path,))
-                    existing_rev = c.fetchone()
-                    if existing_rev:
-                        c.execute('UPDATE books SET status = ? WHERE id = ?',
-                                  ('structure_reversed', existing_rev['id']))
-                    else:
-                        c.execute('''INSERT INTO books (path, current_author, current_title, status)
-                                     VALUES (?, ?, ?, 'structure_reversed')''', (path, author, title))
-                    conn.commit()
-                    # Don't add to regular queue - needs special handling
-                    continue
-
-                # Check for nested structure (disc folders inside book folder)
-                nested_dirs = [d for d in title_dir.iterdir() if d.is_dir()]
-                disc_dirs = [d for d in nested_dirs if is_disc_chapter_folder(d.name)]
-                if disc_dirs:
-                    all_issues.append(f"has_{len(disc_dirs)}_disc_folders")
-
-                # Check for ebook files
-                ebook_files = [f for f in title_dir.rglob('*') if f.suffix.lower() in EBOOK_EXTENSIONS]
-                audio_in_folder = [f for f in title_dir.rglob('*') if f.suffix.lower() in AUDIO_EXTENSIONS]
-
-                if ebook_files:
-                    if audio_in_folder:
-                        # Mixed folder - ebooks with audiobooks
-                        all_issues.append(f"has_{len(ebook_files)}_ebook_files")
-                    elif config.get('ebook_management', False):
-                        # Ebook-only folder - queue for ebook organization
-                        all_issues.append('ebook_only_folder')
-                        logger.info(f"Found ebook-only folder: {path} ({len(ebook_files)} ebooks)")
-
-                # Store issues
-                if all_issues:
-                    issues_found[path] = all_issues
-
-                # Add to database
-                c.execute('SELECT id, status FROM books WHERE path = ?', (path,))
-                existing = c.fetchone()
-
-                if existing:
-                    if existing['status'] in ['verified', 'fixed']:
-                        continue
-                    book_id = existing['id']
-                else:
-                    c.execute('''INSERT INTO books (path, current_author, current_title, status)
-                                 VALUES (?, ?, ?, 'pending')''', (path, author, title))
-                    conn.commit()
-                    book_id = c.lastrowid
-                    scanned += 1
-
-                # Add to queue if has issues
-                if all_issues:
-                    # Skip multi-book collections - they need manual splitting, not renaming
-                    if 'multi_book_collection' in all_issues:
-                        logger.info(f"Skipping multi-book collection (needs manual split): {path}")
-                        c.execute('UPDATE books SET status = ? WHERE id = ?',
-                                  ('needs_split', book_id))
-                        conn.commit()
-                        continue
-
-                    reason = "; ".join(all_issues[:3])  # First 3 issues
-                    if len(all_issues) > 3:
-                        reason += f" (+{len(all_issues)-3} more)"
-
-                    c.execute('SELECT id FROM queue WHERE book_id = ?', (book_id,))
-                    if not c.fetchone():
-                        c.execute('''INSERT INTO queue (book_id, reason, priority)
-                                    VALUES (?, ?, ?)''',
-                                 (book_id, reason, min(len(all_issues), 10)))
-                        conn.commit()
-                        queued += 1
+        # Second pass: Recursively analyze folder structure
+        logger.info("Starting recursive folder structure analysis...")
+        s, q, i = scan_folder_recursive(lib_path, lib_path, config, conn, c,
+                                       author_context=None, series_context=None,
+                                       depth=0, max_depth=5)
+        scanned += s
+        queued += q
+        issues_found.update(i)
+        logger.info(f"Recursive scan complete: {s} scanned, {q} queued")
 
     # Third pass: Flag duplicates
     logger.info("Checking for duplicates...")
@@ -4590,6 +4830,12 @@ def dashboard():
 def orphans_page():
     """Orphan files management page."""
     return render_template('orphans.html')
+
+
+@app.route('/empty_folders')
+def empty_folders_page():
+    """Empty folders management page."""
+    return render_template('empty_folders.html')
 
 @app.route('/queue')
 def queue_page():
@@ -5685,6 +5931,238 @@ def api_organize_all_orphans():
         'organized': results['organized'],
         'errors': results['errors'],
         'details': results['details'][:20]  # Limit details
+    })
+
+
+@app.route('/api/empty_folders')
+def api_empty_folders():
+    """Get all empty book folders (folders without audio files)."""
+    conn = get_db()
+    c = conn.cursor()
+    
+    c.execute('''SELECT id, path, current_author, current_title, created_at
+                 FROM books
+                 WHERE status = 'empty_folder'
+                 ORDER BY path''')
+    
+    folders = []
+    for row in c.fetchall():
+        folder_path = Path(row['path'])
+        # Verify folder still exists and is still empty
+        if folder_path.exists() and folder_path.is_dir():
+            # Check if it still has no audio files and no content files (only metadata)
+            config = load_config()
+            all_files = [f for f in folder_path.rglob('*') if f.is_file()]
+            audio_files = [f for f in all_files if f.suffix.lower() in AUDIO_EXTENSIONS]
+            ebook_files = [f for f in all_files if f.suffix.lower() in EBOOK_EXTENSIONS]
+            ebook_management_enabled = config.get('ebook_management', False)
+            
+            # Check for content files (excluding metadata)
+            content_files = []
+            for f in all_files:
+                is_metadata = (
+                    f.suffix.lower() in METADATA_EXTENSIONS or
+                    f.name.lower() in METADATA_FILENAMES or
+                    f.name.lower().endswith('.nfo')
+                )
+                is_ebook = f.suffix.lower() in EBOOK_EXTENSIONS
+                
+                # Ebooks count as content if ebook_management is disabled
+                if is_ebook and not ebook_management_enabled:
+                    content_files.append(f)
+                elif not is_metadata and not is_ebook:
+                    content_files.append(f)
+            
+            # If no audio files and no content files (only metadata/nfo), still empty
+            # (Allow ebooks if ebook_management is enabled)
+            if not audio_files and len(content_files) == 0:
+                # If ebook_management is enabled and there are ebooks, don't show as empty
+                if ebook_management_enabled and ebook_files:
+                    # Has ebooks, update status
+                    c.execute('UPDATE books SET status = ? WHERE id = ?', ('pending', row['id']))
+                    continue
+                folders.append({
+                    'id': row['id'],
+                    'path': row['path'],
+                    'author': row['current_author'] or 'Unknown',
+                    'title': row['current_title'] or folder_path.name,
+                    'created_at': row['created_at']
+                })
+            else:
+                # Folder now has audio or content files, update status
+                c.execute('UPDATE books SET status = ? WHERE id = ?', ('pending', row['id']))
+    
+    conn.commit()
+    conn.close()
+    
+    return jsonify({
+        'count': len(folders),
+        'folders': folders
+    })
+
+
+@app.route('/api/empty_folders/delete/<int:folder_id>', methods=['POST'])
+def api_delete_empty_folder(folder_id):
+    """Delete an empty book folder."""
+    import shutil
+    
+    conn = get_db()
+    c = conn.cursor()
+    
+    c.execute('SELECT id, path, status FROM books WHERE id = ?', (folder_id,))
+    book = c.fetchone()
+    
+    if not book:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Folder not found in database'}), 404
+    
+    if book['status'] != 'empty_folder':
+        conn.close()
+        return jsonify({'success': False, 'error': 'Folder is not marked as empty'}), 400
+    
+    folder_path = Path(book['path'])
+    
+    if not folder_path.exists():
+        # Folder already deleted, just remove from database
+        c.execute('DELETE FROM books WHERE id = ?', (folder_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'message': 'Folder already deleted (removed from database)'})
+    
+    # Verify it's still empty before deleting (check for audio and content files, ignore metadata)
+    config = load_config()
+    all_files = [f for f in folder_path.rglob('*') if f.is_file()]
+    audio_files = [f for f in all_files if f.suffix.lower() in AUDIO_EXTENSIONS]
+    ebook_files = [f for f in all_files if f.suffix.lower() in EBOOK_EXTENSIONS]
+    ebook_management_enabled = config.get('ebook_management', False)
+    
+    # Check for content files (excluding metadata)
+    content_files = []
+    for f in all_files:
+        is_metadata = (
+            f.suffix.lower() in METADATA_EXTENSIONS or
+            f.name.lower() in METADATA_FILENAMES or
+            f.name.lower().endswith('.nfo')
+        )
+        is_ebook = f.suffix.lower() in EBOOK_EXTENSIONS
+        
+        # Ebooks count as content if ebook_management is disabled
+        if is_ebook and not ebook_management_enabled:
+            content_files.append(f)
+        elif not is_metadata and not is_ebook:
+            content_files.append(f)
+    
+    # If ebook_management is enabled and there are ebooks, don't allow deletion
+    if ebook_management_enabled and ebook_files:
+        conn.close()
+        return jsonify({'success': False, 'error': f'Folder contains {len(ebook_files)} ebook file(s). Cannot delete.'}), 400
+    
+    if audio_files or len(content_files) > 0:
+        conn.close()
+        file_count = len(audio_files) + len(content_files)
+        return jsonify({'success': False, 'error': f'Folder now contains {file_count} content file(s). Cannot delete.'}), 400
+    
+    try:
+        # Delete the folder and all its contents
+        shutil.rmtree(str(folder_path))
+        logger.info(f"Deleted empty folder: {folder_path}")
+        
+        # Remove from database
+        c.execute('DELETE FROM books WHERE id = ?', (folder_id,))
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Deleted empty folder: {folder_path.name}',
+            'path': str(folder_path)
+        })
+    except Exception as e:
+        conn.close()
+        logger.error(f"Failed to delete empty folder {folder_path}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/empty_folders/delete_all', methods=['POST'])
+def api_delete_all_empty_folders():
+    """Delete all empty book folders."""
+    import shutil
+    
+    config = load_config()
+    conn = get_db()
+    c = conn.cursor()
+    
+    c.execute('''SELECT id, path FROM books WHERE status = 'empty_folder' ORDER BY path''')
+    folders = c.fetchall()
+    
+    deleted = 0
+    errors = 0
+    details = []
+    
+    for row in folders:
+        folder_path = Path(row['path'])
+        
+        if not folder_path.exists():
+            # Already deleted, remove from database
+            c.execute('DELETE FROM books WHERE id = ?', (row['id'],))
+            deleted += 1
+            details.append(f"Already deleted: {folder_path.name}")
+            continue
+        
+        # Verify it's still empty (check for audio and content files, ignore metadata)
+        all_files = [f for f in folder_path.rglob('*') if f.is_file()]
+        audio_files = [f for f in all_files if f.suffix.lower() in AUDIO_EXTENSIONS]
+        ebook_files = [f for f in all_files if f.suffix.lower() in EBOOK_EXTENSIONS]
+        ebook_management_enabled = config.get('ebook_management', False)
+        
+        # Check for content files (excluding metadata)
+        content_files = []
+        for f in all_files:
+            is_metadata = (
+                f.suffix.lower() in METADATA_EXTENSIONS or
+                f.name.lower() in METADATA_FILENAMES or
+                f.name.lower().endswith('.nfo')
+            )
+            is_ebook = f.suffix.lower() in EBOOK_EXTENSIONS
+            
+            # Ebooks count as content if ebook_management is disabled
+            if is_ebook and not ebook_management_enabled:
+                content_files.append(f)
+            elif not is_metadata and not is_ebook:
+                content_files.append(f)
+        
+        # If ebook_management is enabled and there are ebooks, don't delete
+        if ebook_management_enabled and ebook_files:
+            c.execute('UPDATE books SET status = ? WHERE id = ?', ('pending', row['id']))
+            details.append(f"Skipped (has {len(ebook_files)} ebook file(s)): {folder_path.name}")
+            continue
+        
+        if audio_files or len(content_files) > 0:
+            # No longer empty, update status
+            c.execute('UPDATE books SET status = ? WHERE id = ?', ('pending', row['id']))
+            file_count = len(audio_files) + len(content_files)
+            details.append(f"Skipped (now has {file_count} content file(s)): {folder_path.name}")
+            continue
+        
+        try:
+            shutil.rmtree(str(folder_path))
+            c.execute('DELETE FROM books WHERE id = ?', (row['id'],))
+            deleted += 1
+            details.append(f"Deleted: {folder_path.name}")
+            logger.info(f"Deleted empty folder: {folder_path}")
+        except Exception as e:
+            errors += 1
+            details.append(f"Error deleting {folder_path.name}: {e}")
+            logger.error(f"Failed to delete empty folder {folder_path}: {e}")
+    
+    conn.commit()
+    conn.close()
+    
+    return jsonify({
+        'success': True,
+        'deleted': deleted,
+        'errors': errors,
+        'details': details
     })
 
 

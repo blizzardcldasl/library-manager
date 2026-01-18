@@ -2,6 +2,52 @@
 
 All notable changes to Library Manager will be documented in this file.
 
+> **Note:** This is a fork of [deucebucket/library-manager](https://github.com/deucebucket/library-manager).  
+> Changes marked with `[FORK]` are specific to this fork.  
+> See [FORK_NOTES.md](FORK_NOTES.md) for fork details.
+
+---
+
+## [0.9.0-beta.27-fork.1] - 2025-01-XX [FORK]
+
+### Added
+- **Recursive Structure Scanning** - Fully recursive folder analysis at any depth
+  - Handles Author/Series/Book and deeper nesting (previously only 2-level)
+  - Recursively processes all subdirectories, not just direct children
+  - New `scan_folder_recursive()` function for nested structure handling
+- **File-to-Folder Matching Verification** - Validates files match their folders
+  - Reads audio file metadata (ID3 tags) and compares with folder structure
+  - New `verify_file_matches_folder()` function for cross-validation
+  - Detects when files are in wrong folders
+  - Flags `file_folder_mismatch`, `file_title_mismatch`, `file_author_mismatch` issues
+- **Empty Folder Management** - Detect and manage empty book folders
+  - New "Empty Folders" page in GUI
+  - API endpoints: `/api/empty_folders`, `/api/empty_folders/delete/<id>`, `/api/empty_folders/delete_all`
+  - Treats folders with only metadata/nfo files as empty (ignores .nfo, .txt, .json, .xml, cover images)
+  - Safety checks before deletion
+- **Enhanced Name Pattern Matching** - Improved author/title detection
+  - Extracted `looks_like_person_name()` to shared function
+  - Handles 3-word names, initials, prefixes (Le, De, Von, etc.)
+  - Better detection of author-like titles
+
+### Improved
+- **Structure Detection** - More comprehensive reversed structure detection
+  - Detects when author folder doesn't look like a person name
+  - Better handling of edge cases
+  - Enhanced pattern matching for author/title identification
+- **Cross-Validation** - Compares detected structure with actual file metadata
+  - Samples up to 3 audio files per folder for verification
+  - Word-based similarity matching (30% for titles, 40% for authors)
+  - Confidence scoring (low/medium/high)
+
+### Technical
+- Added `METADATA_EXTENSIONS` and `METADATA_FILENAMES` constants
+- Added `calculate_name_similarity()` helper function
+- Enhanced `analyze_title()` to use comprehensive name pattern matching
+- Updated all empty folder checks to ignore metadata files
+
+---
+
 ## [0.9.0-beta.27] - 2025-12-13
 
 ### Fixed
