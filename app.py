@@ -7206,8 +7206,10 @@ def api_search_all_apis():
     results_by_source = {}
     
     # Search each API
+    # Note: Audnexus requires ASIN - skip in GUI search since ASIN not available from query
+    # Audnexus will still work in automatic metadata lookup when ASIN is found in audio files
     apis = [
-        ('Audnexus', lambda: search_audnexus(clean_title, author=author)),
+        # ('Audnexus', lambda: search_audnexus(clean_title, author=author, asin=None)),  # Requires ASIN
         ('OpenLibrary', lambda: search_openlibrary(clean_title, author=author)),
         ('Google Books', lambda: search_google_books(clean_title, author=author, api_key=config.get('google_books_api_key'))),
         ('Hardcover', lambda: search_hardcover(clean_title, author=author)),
