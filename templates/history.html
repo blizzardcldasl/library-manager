@@ -12,6 +12,11 @@
         {% endif %}
     </h2>
     <div>
+        {% if status_filter == 'pending' %}
+        <button id="bulk-apply-btn" class="btn btn-sm btn-success me-2" onclick="bulkApplyFixes()" disabled>
+            <i class="bi bi-check-all"></i> Apply Selected (<span id="selected-count">0</span>)
+        </button>
+        {% endif %}
         {% if status_filter %}
         <a href="/history" class="btn btn-sm btn-outline-secondary me-2">
             <i class="bi bi-x"></i> Clear Filter
@@ -31,6 +36,11 @@
         <table class="table table-sm mb-0 resizable-table" style="table-layout: auto;">
             <thead style="position: sticky; top: 0; background: rgba(22, 33, 62, 0.98); z-index: 10;">
                 <tr>
+                    {% if status_filter == 'pending' %}
+                    <th style="width: 40px;">
+                        <input type="checkbox" id="select-all-checkbox" onchange="toggleSelectAll(this)" title="Select all">
+                    </th>
+                    {% endif %}
                     <th style="width: 90px;">Date</th>
                     <th style="width: 25%;">Original</th>
                     <th style="width: 30px;"></th>
@@ -42,6 +52,11 @@
             <tbody>
                 {% for h in history_items %}
                 <tr>
+                    {% if status_filter == 'pending' %}
+                    <td>
+                        <input type="checkbox" class="fix-checkbox" value="{{ h.id }}" onchange="updateBulkApplyButton()">
+                    </td>
+                    {% endif %}
                     <td><small>{{ h.fixed_at[5:16] }}</small></td>
                     <td title="{{ h.old_path }}">
                         <strong class="text-danger">{{ h.old_author }}</strong><br>
@@ -209,5 +224,89 @@ function dismissError(historyId) {
         })
         .catch(e => showErrorWithHelp('Error: ' + e, 'api'));
 }
+
+// Bulk apply functionality
+function updateBulkApplyButton() {
+    const checkboxes = document.querySelectorAll('.fix-checkbox:checked');
+    const count = checkboxes.length;
+    const btn = document.getElementById('bulk-apply-btn');
+    const countSpan = document.getElementById('selected-count');
+    
+    if (btn) {
+        btn.disabled = count === 0;
+        if (countSpan) {
+            countSpan.textContent = count;
+        }
+    }
+    
+    // Update select-all checkbox state
+    const selectAll = document.getElementById('select-all-checkbox');
+    if (selectAll) {
+        const allCheckboxes = document.querySelectorAll('.fix-checkbox');
+        selectAll.checked = allCheckboxes.length > 0 && checkboxes.length === allCheckboxes.length;
+        selectAll.indeterminate = checkboxes.length > 0 && checkboxes.length < allCheckboxes.length;
+    }
+}
+
+function toggleSelectAll(checkbox) {
+    const checkboxes = document.querySelectorAll('.fix-checkbox');
+    checkboxes.forEach(cb => cb.checked = checkbox.checked);
+    updateBulkApplyButton();
+}
+
+function bulkApplyFixes() {
+    const checkboxes = document.querySelectorAll('.fix-checkbox:checked');
+    const historyIds = Array.from(checkboxes).map(cb => parseInt(cb.value));
+    
+    if (historyIds.length === 0) {
+        showWarning('Please select at least one fix to apply.', 'No Selection');
+        return;
+    }
+    
+    if (!confirm(`Apply ${historyIds.length} selected fix(es)? This will rename folders in your library.`)) {
+        return;
+    }
+    
+    const btn = document.getElementById('bulk-apply-btn');
+    const originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Applying...';
+    
+    showInfo(`Applying ${historyIds.length} fix(es)...`, 'Applying Fixes');
+    
+    fetch('/api/apply_fixes_bulk', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({history_ids: historyIds})
+    })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                if (data.errors > 0) {
+                    showWarning(
+                        `Applied ${data.applied} fix(es), ${data.errors} error(s). Check history for details.`,
+                        'Bulk Apply Complete'
+                    );
+                } else {
+                    showSuccess(`Successfully applied ${data.applied} fix(es)!`, 'Bulk Apply Complete');
+                }
+                setTimeout(() => location.reload(), 2000);
+            } else {
+                btn.disabled = false;
+                btn.innerHTML = originalHtml;
+                showErrorWithHelp(data.error || 'Failed to apply fixes', 'api');
+            }
+        })
+        .catch(e => {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+            showErrorWithHelp('Failed to apply fixes: ' + e, 'api');
+        });
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    updateBulkApplyButton();
+});
 </script>
 {% endblock %}

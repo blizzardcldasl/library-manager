@@ -5765,6 +5765,52 @@ def api_apply_all_pending():
         'message': f'Applied {applied} fixes, {errors} errors'
     })
 
+@app.route('/api/apply_fixes_bulk', methods=['POST'])
+def api_apply_fixes_bulk():
+    """Apply multiple fixes by their history IDs."""
+    data = request.get_json() or {}
+    history_ids = data.get('history_ids', [])
+    
+    if not history_ids:
+        return jsonify({'success': False, 'error': 'No history IDs provided'})
+    
+    if not isinstance(history_ids, list):
+        return jsonify({'success': False, 'error': 'history_ids must be an array'})
+    
+    # Validate all IDs are pending fixes
+    conn = get_db()
+    c = conn.cursor()
+    placeholders = ','.join(['?'] * len(history_ids))
+    c.execute(f"SELECT id FROM history WHERE id IN ({placeholders}) AND status = 'pending_fix'", history_ids)
+    valid_ids = [row['id'] for row in c.fetchall()]
+    conn.close()
+    
+    if len(valid_ids) != len(history_ids):
+        return jsonify({
+            'success': False,
+            'error': f'Some IDs are invalid or not pending: {len(valid_ids)}/{len(history_ids)} valid'
+        })
+    
+    applied = 0
+    errors = 0
+    error_details = []
+    
+    for history_id in history_ids:
+        success, message = apply_fix(history_id)
+        if success:
+            applied += 1
+        else:
+            errors += 1
+            error_details.append({'id': history_id, 'error': message})
+    
+    return jsonify({
+        'success': True,
+        'applied': applied,
+        'errors': errors,
+        'error_details': error_details,
+        'message': f'Applied {applied} fixes, {errors} errors'
+    })
+
 @app.route('/api/remove_from_queue/<int:queue_id>', methods=['POST'])
 def api_remove_from_queue(queue_id):
     """Remove an item from the queue."""
