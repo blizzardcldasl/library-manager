@@ -7060,6 +7060,88 @@ def api_abs_remove_exclude():
 # Use the public BookBucket API - same as metadata pipeline
 # No API key required - the search endpoints are public
 
+@app.route('/api/search_all_apis')
+def api_search_all_apis():
+    """Search all metadata APIs (Audnexus, OpenLibrary, Google Books, Hardcover, BookBucket) and return results grouped by source."""
+    query = request.args.get('q', '').strip()
+    author = request.args.get('author', '').strip()
+    
+    if not query or len(query) < 2:
+        return jsonify({'error': 'Query must be at least 2 characters', 'results_by_source': {}})
+    
+    config = load_config()
+    clean_title = clean_search_title(query)
+    
+    if not clean_title or len(clean_title) < 3:
+        return jsonify({'error': 'Query too short after cleaning', 'results_by_source': {}})
+    
+    results_by_source = {}
+    
+    # Search each API
+    apis = [
+        ('Audnexus', lambda: search_audnexus(clean_title, author=author)),
+        ('OpenLibrary', lambda: search_openlibrary(clean_title, author=author)),
+        ('Google Books', lambda: search_google_books(clean_title, author=author, api_key=config.get('google_books_api_key'))),
+        ('Hardcover', lambda: search_hardcover(clean_title, author=author)),
+    ]
+    
+    for api_name, search_func in apis:
+        try:
+            result = search_func()
+            if result:
+                # Normalize result format for display
+                normalized = {
+                    'title': result.get('title') or result.get('name', ''),
+                    'author': result.get('author') or result.get('author_name', ''),
+                    'year': result.get('year') or result.get('year_published'),
+                    'series': result.get('series') or result.get('series_name'),
+                    'series_position': result.get('series_num') or result.get('series_position'),
+                    'narrator': result.get('narrator'),
+                    'source': api_name,
+                    'raw_result': result  # Keep original for detailed view
+                }
+                
+                if normalized['title'] and normalized['author']:
+                    if api_name not in results_by_source:
+                        results_by_source[api_name] = []
+                    results_by_source[api_name].append(normalized)
+        except Exception as e:
+            logger.debug(f"{api_name} search failed: {e}")
+            # Continue to next API - non-blocking
+    
+    # Also try BookBucket API search (public endpoint)
+    try:
+        bookbucket_results = search_bookdb_api(clean_title)
+        if bookbucket_results:
+            normalized = {
+                'title': bookbucket_results.get('title', ''),
+                'author': bookbucket_results.get('author', ''),
+                'year': bookbucket_results.get('year'),
+                'series': bookbucket_results.get('series'),
+                'series_position': bookbucket_results.get('series_num'),
+                'source': 'BookBucket',
+                'raw_result': bookbucket_results
+            }
+            if normalized['title'] and normalized['author']:
+                if 'BookBucket' not in results_by_source:
+                    results_by_source['BookBucket'] = []
+                # Avoid duplicates
+                if not any(r['title'] == normalized['title'] and r['author'] == normalized['author'] 
+                          for r in results_by_source.get('BookBucket', [])):
+                    results_by_source['BookBucket'].append(normalized)
+    except Exception as e:
+        logger.debug(f"BookBucket API search failed: {e}")
+    
+    total_count = sum(len(results) for results in results_by_source.values())
+    
+    return jsonify({
+        'success': True,
+        'results_by_source': results_by_source,
+        'total_count': total_count,
+        'sources_searched': len([api for api, _ in apis])
+    })
+
+
 @app.route('/api/search_bookdb')
 def api_search_bookdb():
     """Search BookBucket for books/series to manually match.

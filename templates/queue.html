@@ -130,22 +130,33 @@
 
                 <hr class="text-muted">
 
-                <!-- Search BookBucket -->
+                <!-- Search All APIs -->
                 <div class="mb-3">
-                    <label class="form-label"><i class="bi bi-search"></i> Search BookBucket Database</label>
-                    <div class="input-group">
+                    <label class="form-label"><i class="bi bi-search"></i> Search All Metadata Sources</label>
+                    <div class="input-group mb-2">
                         <input type="text" class="form-control bg-dark text-light" id="search-query" placeholder="Search by title or author...">
-                        <button class="btn btn-outline-info" type="button" onclick="searchBookDB()">
-                            <i class="bi bi-search"></i> Search
+                        <button class="btn btn-primary" type="button" onclick="searchAllAPIs()" id="search-all-apis-btn">
+                            <i class="bi bi-search"></i> Search All APIs
+                        </button>
+                        <button class="btn btn-outline-info" type="button" onclick="searchBookDB()" id="search-bookbucket-btn" title="Search only BookBucket">
+                            <i class="bi bi-database"></i> BookBucket Only
                         </button>
                     </div>
-                    <small class="text-muted">Search across <span id="db-stats-text">our book database</span> to find the correct match</small>
+                    <small class="text-muted">Searches: Audnexus, OpenLibrary, Google Books, Hardcover, and BookBucket</small>
+                </div>
+
+                <!-- Search Status -->
+                <div id="search-status" class="mb-2 d-none">
+                    <div class="d-flex align-items-center">
+                        <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
+                        <small class="text-muted" id="search-status-text">Searching APIs...</small>
+                    </div>
                 </div>
 
                 <!-- Search Results -->
-                <div id="search-results" class="mb-3" style="max-height: 300px; overflow-y: auto; display: none;">
-                    <div class="list-group" id="search-results-list">
-                        <!-- Results inserted here -->
+                <div id="search-results" class="mb-3" style="max-height: 400px; overflow-y: auto; display: none;">
+                    <div id="search-results-list">
+                        <!-- Results inserted here - grouped by source -->
                     </div>
                 </div>
 
@@ -487,6 +498,153 @@ function editItem(queueId, author, title) {
     log(`Editing item ${queueId}: ${author} - ${title}`);
 }
 
+function searchAllAPIs() {
+    const query = document.getElementById('search-query').value.trim();
+    const author = document.getElementById('edit-author').value.trim();
+    
+    if (query.length < 2) {
+        showWarning('Search query must be at least 2 characters long.', 'Search Too Short');
+        return;
+    }
+
+    const resultsDiv = document.getElementById('search-results');
+    const resultsList = document.getElementById('search-results-list');
+    const statusDiv = document.getElementById('search-status');
+    const statusText = document.getElementById('search-status-text');
+    const searchBtn = document.getElementById('search-all-apis-btn');
+    
+    // Show loading state
+    statusDiv.classList.remove('d-none');
+    statusText.textContent = 'Searching all APIs...';
+    searchBtn.disabled = true;
+    resultsList.innerHTML = '<div class="text-center py-3 text-muted">Searching Audnexus, OpenLibrary, Google Books, Hardcover, and BookBucket...</div>';
+    resultsDiv.style.display = 'block';
+
+    const searchUrl = `/api/search_all_apis?q=${encodeURIComponent(query)}${author ? '&author=' + encodeURIComponent(author) : ''}`;
+    
+    fetch(searchUrl)
+        .then(r => r.json())
+        .then(data => {
+            statusDiv.classList.add('d-none');
+            searchBtn.disabled = false;
+            
+            if (data.error) {
+                resultsList.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+                return;
+            }
+
+            if (!data.results_by_source || Object.keys(data.results_by_source).length === 0) {
+                resultsList.innerHTML = '<div class="alert alert-warning">No results found from any API. Try a different search term.</div>';
+                return;
+            }
+
+            // Group results by source
+            let html = '';
+            const sourceColors = {
+                'Audnexus': 'info',
+                'OpenLibrary': 'primary',
+                'Google Books': 'success',
+                'Hardcover': 'warning',
+                'BookBucket': 'secondary'
+            };
+            
+            for (const [source, results] of Object.entries(data.results_by_source)) {
+                const color = sourceColors[source] || 'secondary';
+                html += `
+                    <div class="mb-3">
+                        <h6 class="text-${color} mb-2">
+                            <i class="bi bi-database"></i> ${source} 
+                            <span class="badge bg-${color}">${results.length}</span>
+                        </h6>
+                        <div class="list-group">
+                `;
+                
+                results.forEach((book, idx) => {
+                    const bookId = `all-apis-${source}-${idx}`;
+                    const series = book.series ? ` (${book.series}${book.series_position ? ' #' + book.series_position : ''})` : '';
+                    const year = book.year ? ` <span class="text-muted">(${book.year})</span>` : '';
+                    const narrator = book.narrator ? ` <small class="text-info">Narrated by ${book.narrator}</small>` : '';
+                    
+                    html += `
+                        <a href="#" class="list-group-item list-group-item-action bg-dark text-light search-result-item"
+                           data-book-id="${bookId}"
+                           data-source="${source}"
+                           onclick="selectAPIResult('${source}', ${idx}); return false;">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div class="flex-grow-1">
+                                    <div class="fw-bold">${escapeHtml(book.title)}</div>
+                                    <div class="text-info">${escapeHtml(book.author)}${year}</div>
+                                    ${series ? `<div class="text-warning small">${escapeHtml(series)}</div>` : ''}
+                                    ${narrator}
+                                </div>
+                                <span class="badge bg-${color} ms-2">${source}</span>
+                            </div>
+                        </a>
+                    `;
+                });
+                
+                html += `
+                        </div>
+                    </div>
+                `;
+            }
+            
+            html += `<div class="text-muted small mt-2">Found ${data.total_count} result(s) across ${Object.keys(data.results_by_source).length} source(s)</div>`;
+            
+            resultsList.innerHTML = html;
+            
+            // Store results for selection
+            window._allAPIResults = data.results_by_source;
+            
+            log(`Found ${data.total_count} results from ${Object.keys(data.results_by_source).length} APIs`);
+        })
+        .catch(e => {
+            statusDiv.classList.add('d-none');
+            searchBtn.disabled = false;
+            resultsList.innerHTML = `<div class="alert alert-danger">Error: ${e}</div>`;
+            log('Search all APIs error: ' + e);
+        });
+}
+
+function selectAPIResult(source, idx) {
+    if (!window._allAPIResults || !window._allAPIResults[source] || !window._allAPIResults[source][idx]) {
+        return;
+    }
+    
+    const book = window._allAPIResults[source][idx];
+    
+    // Fill in the form fields
+    if (book.author) {
+        document.getElementById('edit-author').value = book.author;
+    }
+    if (book.title) {
+        document.getElementById('edit-title').value = book.title;
+    }
+    
+    // Store selected result (use same format as BookBucket for compatibility)
+    selectedBookDBResult = {
+        author_name: book.author,
+        name: book.title,
+        title: book.title,
+        series_name: book.series,
+        series_position: book.series_position,
+        year_published: book.year,
+        source: book.source
+    };
+    
+    // Show selected match
+    const matchDiv = document.getElementById('selected-match');
+    const matchText = document.getElementById('selected-match-text');
+    const series = book.series ? ` (${book.series}${book.series_position ? ' #' + book.series_position : ''})` : '';
+    matchText.textContent = `${book.author || 'Unknown'} - ${book.title || 'Unknown'}${series} [${source}]`;
+    matchDiv.classList.remove('d-none');
+    
+    // Hide search results
+    document.getElementById('search-results').style.display = 'none';
+    
+    log(`Selected from ${source}: ${book.author} - ${book.title}`);
+}
+
 function searchBookDB() {
     const query = document.getElementById('search-query').value.trim();
     if (query.length < 2) {
@@ -512,7 +670,7 @@ function searchBookDB() {
                 return;
             }
 
-            resultsList.innerHTML = data.results.map((book, idx) => {
+            resultsList.innerHTML = '<div class="mb-2"><h6 class="text-secondary"><i class="bi bi-database"></i> BookBucket Results</h6></div><div class="list-group">' + data.results.map((book, idx) => {
                 const author = book.author_name || 'Unknown Author';
                 const title = book.name || book.title || 'Unknown Title';
                 const series = book.series_name ? `${book.series_name}${book.series_position ? ' #' + book.series_position : ''}` : '';
@@ -573,11 +731,11 @@ function searchBookDB() {
                         </div>
                     </a>
                 `;
-            }).join('');
+            }).join('') + '</div>';
 
-            // Store results for selection
+            // Store results for selection (for compatibility with existing code)
             window._searchResults = data.results;
-            log(`Found ${data.results.length} results for "${query}"`);
+            log(`Found ${data.results.length} BookBucket results for "${query}"`);
         })
         .catch(e => {
             resultsList.innerHTML = `<div class="list-group-item bg-dark text-danger">Error: ${e}</div>`;
