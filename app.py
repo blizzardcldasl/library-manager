@@ -4307,13 +4307,17 @@ def deep_scan_library(config):
 
         # Second pass: Recursively analyze folder structure
         logger.info("Starting recursive folder structure analysis...")
-        s, q, i = scan_folder_recursive(lib_path, lib_path, config, conn, c,
-                                       author_context=None, series_context=None,
-                                       depth=0, max_depth=5)
-        scanned += s
-        queued += q
-        issues_found.update(i)
-        logger.info(f"Recursive scan complete: {s} scanned, {q} queued")
+        try:
+            s, q, i = scan_folder_recursive(lib_path, lib_path, config, conn, c,
+                                           author_context=None, series_context=None,
+                                           depth=0, max_depth=5)
+            scanned += s
+            queued += q
+            issues_found.update(i)
+            logger.info(f"Recursive scan complete: {s} scanned, {q} queued")
+        except Exception as e:
+            logger.error(f"Error during recursive folder scan: {e}", exc_info=True)
+            # Continue to duplicate detection even if recursive scan fails
 
     # Third pass: Flag duplicates
     logger.info("Checking for duplicates...")
