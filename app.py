@@ -4183,9 +4183,13 @@ def deep_scan_library(config):
 
         # Track file signatures for duplicate detection
         # NOTE: For large libraries (10k+ files), this can be slow - process in batches with progress
-        # For very large libraries (>20k files), we can skip detailed duplicate detection to speed up scan
+        # For very large libraries (>=20k files), skip detailed duplicate detection by default to speed up scan
         total_files = len(all_audio_files)
-        enable_duplicate_detection = total_files < 20000 or config.get('enable_duplicate_detection', True)
+        # For large libraries, only enable if explicitly set in config
+        if total_files >= 20000:
+            enable_duplicate_detection = config.get('enable_duplicate_detection', False)
+        else:
+            enable_duplicate_detection = config.get('enable_duplicate_detection', True)
         
         if enable_duplicate_detection:
             logger.info(f"Processing {total_files} files for duplicate detection...")
