@@ -49,6 +49,11 @@ jobs:
             type=ref,event=branch
             # Tag with PR number
             type=ref,event=pr
+          labels: |
+            org.opencontainers.image.title=Library Manager (Fork)
+            org.opencontainers.image.description=Fork with enhanced recursive scanning, file verification, and empty folder management
+            org.opencontainers.image.source=https://github.com/blizzardcldasl/library-manager
+            org.opencontainers.image.url=https://github.com/blizzardcldasl/library-manager
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5

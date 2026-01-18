@@ -1,19 +1,19 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>library-manager</Name>
-  <Repository>ghcr.io/deucebucket/library-manager:latest</Repository>
-  <Registry>https://github.com/deucebucket/library-manager/pkgs/container/library-manager</Registry>
+  <Repository>ghcr.io/blizzardcldasl/library-manager:latest</Repository>
+  <Registry>https://github.com/blizzardcldasl/library-manager/pkgs/container/library-manager</Registry>
   <Network>bridge</Network>
   <MyIP/>
   <Shell>bash</Shell>
   <Privileged>false</Privileged>
-  <Support>https://github.com/deucebucket/library-manager/issues</Support>
-  <Project>https://github.com/deucebucket/library-manager</Project>
-  <Overview>Library Manager - Audiobook library management with smart metadata matching, series detection, and organization. Scans your audiobook library, matches metadata from multiple sources (Audible, OpenLibrary, etc.), detects series order, and helps organize your collection. Features a modern web UI for browsing and managing your audiobooks.</Overview>
+  <Support>https://github.com/blizzardcldasl/library-manager/issues</Support>
+  <Project>https://github.com/blizzardcldasl/library-manager</Project>
+  <Overview>Library Manager (Fork) - Enhanced audiobook library management with recursive scanning, file verification, and empty folder management. Fork of deucebucket/library-manager with improvements for structure detection and validation.</Overview>
   <Category>MediaApp:Books MediaServer:Books Tools:Utilities</Category>
   <WebUI>http://[IP]:[PORT:5757]/</WebUI>
-  <TemplateURL>https://raw.githubusercontent.com/deucebucket/library-manager/main/unraid/library-manager.xml</TemplateURL>
-  <Icon>https://raw.githubusercontent.com/deucebucket/library-manager/main/static/icon.png</Icon>
+  <TemplateURL>https://raw.githubusercontent.com/blizzardcldasl/library-manager/main/unraid/library-manager.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/blizzardcldasl/library-manager/main/static/icon.png</Icon>
   <ExtraParams/>
   <PostArgs/>
   <CPUset/>

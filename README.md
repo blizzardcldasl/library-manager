@@ -6,7 +6,7 @@
 
 [![Version](https://img.shields.io/badge/version-0.9.0--beta.27--fork.1-blue.svg)](CHANGELOG.md)
 [![Fork](https://img.shields.io/badge/fork-of%20deucebucket%2Flibrary--manager-orange.svg)](https://github.com/deucebucket/library-manager)
-[![Docker](https://img.shields.io/badge/docker-ghcr.io-blue.svg)](https://ghcr.io/deucebucket/library-manager)
+[![Docker](https://img.shields.io/badge/docker-ghcr.io-blue.svg)](https://ghcr.io/blizzardcldasl/library-manager)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
 
 *Automatically fix messy audiobook folders using real book databases + AI intelligence*
@@ -136,12 +136,17 @@ Build your own folder structure:
 ### Option 1: Docker (Recommended)
 
 ```bash
-# Pull from GitHub Container Registry
+# Pull from GitHub Container Registry (this fork)
 docker run -d \
   --name library-manager \
   -p 5757:5757 \
   -v /path/to/audiobooks:/audiobooks \
   -v library-manager-data:/data \
+  ghcr.io/blizzardcldasl/library-manager:latest
+```
+
+Or use the original version:
+```bash
   ghcr.io/deucebucket/library-manager:latest
 ```
 
@@ -151,7 +156,8 @@ Or with Docker Compose:
 version: '3.8'
 services:
   library-manager:
-    image: ghcr.io/deucebucket/library-manager:latest
+    image: ghcr.io/blizzardcldasl/library-manager:latest
+    # Or use original: ghcr.io/deucebucket/library-manager:latest
     container_name: library-manager
     ports:
       - "5757:5757"

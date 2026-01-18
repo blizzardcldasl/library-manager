@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   library-manager:
-    image: ghcr.io/deucebucket/library-manager:latest
+    image: ghcr.io/blizzardcldasl/library-manager:latest
     # Or build locally: comment out 'image' above, uncomment below
     # build: .
     container_name: library-manager

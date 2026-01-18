@@ -223,7 +223,8 @@ All notable changes to Library Manager will be documented in this file.
 - **Docker CI/CD** - Automatic builds to GitHub Container Registry
   - GitHub Actions workflow builds on push to main
   - Multi-arch support (amd64, arm64)
-  - Image at `ghcr.io/deucebucket/library-manager:latest`
+  - Original image at `ghcr.io/deucebucket/library-manager:latest`
+  - Fork image at `ghcr.io/blizzardcldasl/library-manager:latest`
   - UnRaid template updated with correct ghcr.io URL
 
 ### Fixed

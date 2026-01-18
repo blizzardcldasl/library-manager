@@ -12,7 +12,8 @@ Features:
 """
 
 APP_VERSION = "0.9.0-beta.27-fork.1"
-GITHUB_REPO = "deucebucket/library-manager"  # Original GitHub repo
+GITHUB_REPO = "blizzardcldasl/library-manager"  # Fork GitHub repo
+GITHUB_REPO_ORIGINAL = "deucebucket/library-manager"  # Original GitHub repo
 # This is a fork - see FORK_NOTES.md for changes
 
 # Versioning Guide:

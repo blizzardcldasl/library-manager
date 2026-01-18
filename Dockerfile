@@ -1,7 +1,10 @@
 FROM python:3.11-slim
 
-LABEL maintainer="deucebucket"
-LABEL description="Smart Audiobook Library Organizer with Multi-Source Metadata & AI Verification"
+LABEL maintainer="blizzardcldasl"
+LABEL description="Smart Audiobook Library Organizer with Multi-Source Metadata & AI Verification (Fork)"
+LABEL org.opencontainers.image.source="https://github.com/blizzardcldasl/library-manager"
+LABEL org.opencontainers.image.title="Library Manager (Fork)"
+LABEL org.opencontainers.image.description="Fork with enhanced recursive scanning, file verification, and empty folder management"
 
 # Set working directory
 WORKDIR /app
