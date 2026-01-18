@@ -1152,16 +1152,29 @@ def search_audnexus(title, author=None, asin=None, region='us'):
             # Check if it's a region-specific error
             try:
                 error_data = resp.json()
-                if 'not available in region' in error_data.get('message', '').lower():
+                error_msg = error_data.get('message', '').lower()
+                if 'not available in region' in error_msg:
                     logger.debug(f"Audnexus: ASIN {asin} not available in region '{region}'")
-                    # Try US region as fallback
-                    if region != 'us':
-                        logger.debug(f"Audnexus: Trying US region as fallback for ASIN {asin}")
-                        return search_audnexus(title, author, asin, region='us')
+                    # Try other regions as fallback (common regions first)
+                    fallback_regions = ['us', 'uk', 'au', 'ca', 'de', 'es', 'fr', 'in', 'it', 'jp']
+                    # Remove the region we already tried
+                    fallback_regions = [r for r in fallback_regions if r != region]
+                    
+                    for fallback_region in fallback_regions:
+                        logger.debug(f"Audnexus: Trying {fallback_region.upper()} region as fallback for ASIN {asin}")
+                        fallback_result = search_audnexus(title, author, asin, region=fallback_region)
+                        if fallback_result:
+                            # Add note about region fallback
+                            fallback_result['region_fallback'] = f"Found in {fallback_region.upper()} (not available in {region.upper()})"
+                            return fallback_result
+                    
+                    # If we get here, tried all regions and none worked
+                    logger.debug(f"Audnexus: ASIN {asin} not available in any region")
+                    return None
                 else:
                     logger.warning(f"Audnexus: Server error for ASIN {asin}: {error_data.get('message', 'Unknown error')}")
-            except:
-                logger.warning(f"Audnexus: Server error (500) for ASIN {asin}")
+            except Exception as parse_error:
+                logger.warning(f"Audnexus: Server error (500) for ASIN {asin}, could not parse error: {parse_error}")
             return None
         else:
             logger.warning(f"Audnexus: Unexpected status {resp.status_code} for ASIN {asin}")
