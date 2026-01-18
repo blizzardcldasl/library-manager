@@ -14,14 +14,19 @@ This repository includes a GitHub Actions workflow that automatically builds and
 
 ### Making the Image Public
 
+**Important:** The container package visibility is separate from repository visibility. You can make the Docker image public even if your repository is a fork.
+
 By default, GitHub Container Registry images are private. To make it public:
 
-1. Go to https://github.com/blizzardcldasl/library-manager/pkgs/container/library-manager
-2. Click "Package settings" (gear icon)
-3. Scroll to "Danger Zone"
-4. Click "Change visibility"
-5. Select "Public"
-6. Confirm
+1. Wait for the GitHub Actions workflow to build the image first (check Actions tab)
+2. Go to https://github.com/blizzardcldasl/library-manager/pkgs/container/library-manager
+3. Click "Package settings" (gear icon) in the top right
+4. Scroll to "Danger Zone" section
+5. Click "Change visibility"
+6. Select "Public"
+7. Confirm
+
+**Note:** If you see "cannot change visibility of a fork" error, you're likely trying to change the repository visibility, not the container package. The container package can be made public independently. If the package doesn't exist yet, wait for the GitHub Actions workflow to complete first.
 
 ## Manual Build
 
