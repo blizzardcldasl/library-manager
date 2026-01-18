@@ -4008,9 +4008,25 @@ def scan_folder_recursive(folder_path, library_root, config, conn, c,
                 mismatches = 0
                 total_checked = 0
                 
+                # Extract just the book title from folder name (remove series info)
+                # Examples: "The Atlantis Gene (The Origin Mystery #1)" -> "The Atlantis Gene"
+                #           "Book Title - Series #2" -> "Book Title"
+                book_title_for_match = folder_title
+                if series_context or re.search(r'[\(-–—].*#\s*\d+', folder_title):
+                    # If we have series context or folder name contains series info, extract just the book title
+                    # Pattern: "Book Title (Series #1)" or "Book Title - Series #1"
+                    title_match = re.match(r'^(.+?)\s*[\(-–—]\s*[^)]*#\s*\d+', folder_title)
+                    if title_match:
+                        book_title_for_match = title_match.group(1).strip()
+                    else:
+                        # Try pattern: "Series #1: Book Title"
+                        title_match = re.match(r'^[^:]*#\s*\d+\s*[-–—:]\s*(.+)', folder_title)
+                        if title_match:
+                            book_title_for_match = title_match.group(1).strip()
+                
                 for audio_file in sample_files:
                     match_result, match_issues, confidence = verify_file_matches_folder(
-                        audio_file, author_context or 'Unknown', folder_title
+                        audio_file, author_context or 'Unknown', book_title_for_match
                     )
                     total_checked += 1
                     
