@@ -3954,28 +3954,43 @@ def scan_folder_recursive(folder_path, library_root, config, conn, c,
                 return scanned, queued, issues_found
         
         # CRITICAL: Verify files match folder structure using metadata
+        # NOTE: For Author/Series/Title structures, we need to be careful:
+        # - If this is a series folder (has subdirs with books), skip file verification
+        # - Only verify files when this is the actual book folder (leaf node or has audio files directly)
         file_mismatch_issues = []
         if audio_files:
-            # Sample a few audio files to verify they match
-            sample_files = audio_files[:3]  # Check up to 3 files
-            mismatches = 0
-            total_checked = 0
+            # Skip verification if this appears to be a series folder (has subdirectories that look like books)
+            # This prevents false positives for Author/Series/Title structures
+            is_series_folder = False
+            if subdirs:
+                # Check if subdirs look like book folders (not disc/chapter folders)
+                book_like_subdirs = [d for d in subdirs if not is_disc_chapter_folder(d.name)]
+                if book_like_subdirs:
+                    # This is likely a series folder, skip file verification
+                    is_series_folder = True
+                    logger.debug(f"Skipping file verification for series folder: {path_str}")
             
-            for audio_file in sample_files:
-                match_result, match_issues, confidence = verify_file_matches_folder(
-                    audio_file, author_context or 'Unknown', folder_title
-                )
-                total_checked += 1
+            if not is_series_folder:
+                # Sample a few audio files to verify they match
+                sample_files = audio_files[:3]  # Check up to 3 files
+                mismatches = 0
+                total_checked = 0
                 
-                if match_result is False:  # Explicitly False (not None)
-                    mismatches += 1
-                    file_mismatch_issues.extend(match_issues)
-            
-            if mismatches > 0:
-                mismatch_rate = mismatches / total_checked
-                if mismatch_rate >= 0.5:  # 50% or more files don't match
-                    all_issues.append(f'file_folder_mismatch:{mismatch_rate:.0%}_files_dont_match')
-                    logger.warning(f"File-folder mismatch detected: {path_str} ({mismatches}/{total_checked} files)")
+                for audio_file in sample_files:
+                    match_result, match_issues, confidence = verify_file_matches_folder(
+                        audio_file, author_context or 'Unknown', folder_title
+                    )
+                    total_checked += 1
+                    
+                    if match_result is False:  # Explicitly False (not None)
+                        mismatches += 1
+                        file_mismatch_issues.extend(match_issues)
+                
+                if mismatches > 0:
+                    mismatch_rate = mismatches / total_checked
+                    if mismatch_rate >= 0.5:  # 50% or more files don't match
+                        all_issues.append(f'file_folder_mismatch:{mismatch_rate:.0%}_files_dont_match')
+                        logger.warning(f"File-folder mismatch detected: {path_str} ({mismatches}/{total_checked} files)")
         
         # Check for nested disc folders
         nested_dirs = [d for d in subdirs if is_disc_chapter_folder(d.name)]
@@ -7516,7 +7531,7 @@ def api_manual_match():
     if not queue_id:
         return jsonify({'success': False, 'error': 'queue_id required'})
 
-    conn = get_local_db()
+    conn = get_db()
     c = conn.cursor()
 
     # Get the queue item
