@@ -4168,8 +4168,18 @@ def deep_scan_library(config):
         logger.info(f"Scanning: {lib_path}")
 
         # First pass: Find all audio files to understand actual book locations
-        all_audio_files = find_audio_files(lib_path)
-        logger.info(f"Found {len(all_audio_files)} audio files")
+        try:
+            all_audio_files = find_audio_files(lib_path)
+            logger.info(f"Found {len(all_audio_files)} audio files")
+        except OSError as e:
+            if e.errno == 116:  # Stale file handle
+                logger.error(f"Stale file handle when scanning for audio files in {lib_path}. The filesystem may be unmounted or unavailable.")
+            else:
+                logger.error(f"OSError scanning for audio files in {lib_path}: {e}")
+            continue
+        except Exception as e:
+            logger.error(f"Unexpected error scanning for audio files in {lib_path}: {e}")
+            continue
 
         # Track file signatures for duplicate detection
         for audio_file in all_audio_files:
