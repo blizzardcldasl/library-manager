@@ -4134,8 +4134,35 @@ def deep_scan_library(config):
 
     for lib_path_str in config.get('library_paths', []):
         lib_path = Path(lib_path_str)
-        if not lib_path.exists():
-            logger.warning(f"Library path not found: {lib_path}")
+        
+        # Check if path exists and is accessible (handle stale file handles, network issues, etc.)
+        try:
+            if not lib_path.exists():
+                logger.warning(f"Library path not found: {lib_path}")
+                continue
+        except OSError as e:
+            if e.errno == 116:  # Stale file handle
+                logger.error(f"Stale file handle for library path: {lib_path}. The filesystem may be unmounted or unavailable.")
+            else:
+                logger.error(f"OSError accessing library path {lib_path}: {e}")
+            continue
+        except Exception as e:
+            logger.error(f"Unexpected error checking library path {lib_path}: {e}")
+            continue
+        
+        # Verify path is actually a directory
+        try:
+            if not lib_path.is_dir():
+                logger.warning(f"Library path is not a directory: {lib_path}")
+                continue
+        except OSError as e:
+            if e.errno == 116:  # Stale file handle
+                logger.error(f"Stale file handle when checking directory: {lib_path}. The filesystem may be unmounted or unavailable.")
+            else:
+                logger.error(f"OSError checking if library path is directory {lib_path}: {e}")
+            continue
+        except Exception as e:
+            logger.error(f"Unexpected error verifying library path is directory {lib_path}: {e}")
             continue
 
         logger.info(f"Scanning: {lib_path}")
