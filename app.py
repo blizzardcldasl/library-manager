@@ -341,6 +341,44 @@ def extract_folder_metadata(folder_path):
                     hints['audio_author'] = audio['artist'][0]
                 if 'album' in audio:
                     hints['audio_title'] = audio['album'][0]
+                
+                # Try to extract ASIN from audio file metadata
+                asin = None
+                # Check comment field
+                if audio.get('comment'):
+                    comment = str(audio.get('comment')[0])
+                    asin_match = re.search(r'\b([B0-9][A-Z0-9]{9})\b', comment, re.IGNORECASE)
+                    if asin_match:
+                        asin = asin_match.group(1).upper()
+                
+                # Check custom tags
+                if not asin:
+                    for key in audio.keys():
+                        if 'asin' in key.lower() or 'audible' in key.lower():
+                            try:
+                                value = str(audio[key][0])
+                                asin_match = re.search(r'\b([B0-9][A-Z0-9]{9})\b', value, re.IGNORECASE)
+                                if asin_match:
+                                    asin = asin_match.group(1).upper()
+                                    break
+                            except:
+                                pass
+                
+                # Check URL fields
+                if not asin:
+                    for key in ['url', 'www', 'wxxx']:
+                        if key in audio:
+                            try:
+                                url = str(audio[key][0])
+                                asin_match = re.search(r'/dp/([B0-9][A-Z0-9]{9})', url, re.IGNORECASE)
+                                if asin_match:
+                                    asin = asin_match.group(1).upper()
+                                    break
+                            except:
+                                pass
+                
+                if asin:
+                    hints['asin'] = asin
         except Exception:
             pass
 
@@ -1059,42 +1097,88 @@ def search_google_books(title, author=None, api_key=None):
         logger.debug(f"Google Books search failed: {e}")
         return None
 
-def search_audnexus(title, author=None):
-    """Search Audnexus API for audiobook metadata. Pulls from Audible."""
+def search_audnexus(title, author=None, asin=None, region='us'):
+    """Search Audnexus API for audiobook metadata. Pulls from Audible.
+    
+    NOTE: Audnexus API only supports ASIN-based direct lookups, not title-based search.
+    If no ASIN is provided, this function will return None.
+    
+    Args:
+        title: Book title (for logging only - not used in API call)
+        author: Optional author name (for logging only - not used in API call)
+        asin: ASIN (Audible product ID) - REQUIRED for lookup
+        region: Region code (default: 'us'). Valid: us, uk, au, ca, de, es, fr, in, it, jp
+    
+    Returns:
+        dict with title, author, year, narrator, source, or None if not found
+    """
     rate_limit_wait('audnexus')
+    
+    # Audnexus API only supports ASIN-based lookups, not title search
+    if not asin:
+        logger.debug(f"Audnexus: No ASIN provided for '{title}' - skipping (API only supports ASIN lookups)")
+        return None
+    
     try:
-        import urllib.parse
-        # Audnexus search endpoint
-        query = title
-        if author:
-            query = f"{title} {author}"
-
-        url = f"https://api.audnex.us/books?title={urllib.parse.quote(query)}"
-
+        # Direct ASIN lookup with optional region
+        url = f"https://api.audnex.us/books/{asin}"
+        if region and region != 'us':
+            url += f"?region={region}"
+        
+        logger.debug(f"Audnexus ASIN lookup: {url}")
         resp = requests.get(url, timeout=10, headers={'Accept': 'application/json'})
-        if resp.status_code != 200:
+        
+        if resp.status_code == 200:
+            book = resp.json()
+            if book and book.get('title'):
+                result = {
+                    'title': book.get('title', ''),
+                    'author': book.get('authors', [{}])[0].get('name', '') if book.get('authors') else '',
+                    'year': book.get('releaseDate', '')[:4] if book.get('releaseDate') else None,
+                    'narrator': book.get('narrators', [{}])[0].get('name', '') if book.get('narrators') else None,
+                    'asin': asin,
+                    'source': 'audnexus'
+                }
+                if result['title'] and result['author']:
+                    logger.info(f"Audnexus found via ASIN {asin}: {result['author']} - {result['title']}")
+                    return result
+                else:
+                    logger.warning(f"Audnexus: Incomplete result for ASIN {asin} (missing title or author)")
+                    return None
+        elif resp.status_code == 404:
+            logger.debug(f"Audnexus: ASIN {asin} not found (404)")
             return None
-
-        data = resp.json()
-        if not data or not isinstance(data, list) or len(data) == 0:
+        elif resp.status_code == 500:
+            # Check if it's a region-specific error
+            try:
+                error_data = resp.json()
+                if 'not available in region' in error_data.get('message', '').lower():
+                    logger.debug(f"Audnexus: ASIN {asin} not available in region '{region}'")
+                    # Try US region as fallback
+                    if region != 'us':
+                        logger.debug(f"Audnexus: Trying US region as fallback for ASIN {asin}")
+                        return search_audnexus(title, author, asin, region='us')
+                else:
+                    logger.warning(f"Audnexus: Server error for ASIN {asin}: {error_data.get('message', 'Unknown error')}")
+            except:
+                logger.warning(f"Audnexus: Server error (500) for ASIN {asin}")
             return None
-
-        # Get best match
-        best = data[0]
-        result = {
-            'title': best.get('title', ''),
-            'author': best.get('authors', [{}])[0].get('name', '') if best.get('authors') else '',
-            'year': best.get('releaseDate', '')[:4] if best.get('releaseDate') else None,
-            'narrator': best.get('narrators', [{}])[0].get('name', '') if best.get('narrators') else None,
-            'source': 'audnexus'
-        }
-
-        if result['title'] and result['author']:
-            logger.info(f"Audnexus found: {result['author']} - {result['title']}")
-            return result
+        else:
+            logger.warning(f"Audnexus: Unexpected status {resp.status_code} for ASIN {asin}")
+            try:
+                error_text = resp.text[:200]
+                logger.debug(f"Audnexus error response: {error_text}")
+            except:
+                pass
+            return None
+    except requests.exceptions.Timeout:
+        logger.warning(f"Audnexus: Request timeout for ASIN {asin}")
+        return None
+    except requests.exceptions.ConnectionError as e:
+        logger.warning(f"Audnexus: Connection error for ASIN {asin} - {e}")
         return None
     except Exception as e:
-        logger.debug(f"Audnexus search failed: {e}")
+        logger.warning(f"Audnexus search failed for ASIN {asin}: {e}")
         return None
 
 def search_hardcover(title, author=None):
@@ -1859,6 +1943,50 @@ def get_audio_metadata_hints(book_path, config=None):
                 hints['id3_album'] = audio.get('album')[0]
             if audio.get('title'):
                 hints['id3_title'] = audio.get('title')[0]
+            
+            # Try to extract ASIN from various ID3 tag locations
+            # ASIN is often stored in comment, custom tags, or as part of URL
+            asin = None
+            # Check comment field (common location)
+            if audio.get('comment'):
+                comment = str(audio.get('comment')[0])
+                # Look for ASIN pattern (10 alphanumeric characters, often B-prefixed)
+                asin_match = re.search(r'\b([B0-9][A-Z0-9]{9})\b', comment, re.IGNORECASE)
+                if asin_match:
+                    asin = asin_match.group(1).upper()
+            
+            # Check custom tags (varies by format)
+            if not asin:
+                # For MP3: check TXXX frames
+                # For M4B: check custom atoms
+                for key in audio.keys():
+                    if 'asin' in key.lower() or 'audible' in key.lower():
+                        try:
+                            value = str(audio[key][0])
+                            asin_match = re.search(r'\b([B0-9][A-Z0-9]{9})\b', value, re.IGNORECASE)
+                            if asin_match:
+                                asin = asin_match.group(1).upper()
+                                break
+                        except:
+                            pass
+            
+            # Check URL fields (some files have Audible URLs with ASIN)
+            if not asin:
+                for key in ['url', 'www', 'wxxx']:
+                    if key in audio:
+                        try:
+                            url = str(audio[key][0])
+                            # Extract ASIN from audible.com URLs
+                            asin_match = re.search(r'/dp/([B0-9][A-Z0-9]{9})', url, re.IGNORECASE)
+                            if asin_match:
+                                asin = asin_match.group(1).upper()
+                                break
+                        except:
+                            pass
+            
+            if asin:
+                hints['asin'] = asin
+                logger.debug(f"Extracted ASIN from audio file: {asin}")
     except ImportError:
         logger.debug("mutagen not installed - skipping ID3 extraction")
     except Exception as e:
