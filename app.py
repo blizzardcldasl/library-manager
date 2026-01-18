@@ -7233,29 +7233,28 @@ def api_search_audnexus_asin():
         result = search_audnexus(title=None, author=None, asin=asin, region=region)
         
         if result:
+            # Check if this was a region fallback
+            note = None
+            actual_region = region
+            
+            if 'region_fallback' in result:
+                note = result.pop('region_fallback')  # Remove from result, add to response
+                # Extract the actual region from the note (e.g., "Found in UK (not available in US)")
+                region_match = re.search(r'Found in (\w+)', note)
+                if region_match:
+                    actual_region = region_match.group(1).lower()
+            
             return jsonify({
                 'success': True,
                 'result': result,
                 'asin': asin,
-                'region': region
+                'region': actual_region,
+                'note': note
             })
         else:
-            # Try US region as fallback if different region was requested
-            if region != 'us':
-                logger.debug(f"Trying US region as fallback for ASIN {asin}")
-                result = search_audnexus(title=None, author=None, asin=asin, region='us')
-                if result:
-                    return jsonify({
-                        'success': True,
-                        'result': result,
-                        'asin': asin,
-                        'region': 'us',
-                        'note': f'Book not available in {region.upper()}, using US region'
-                    })
-            
             return jsonify({
                 'success': False,
-                'error': f'No book found for ASIN {asin} in region {region.upper()}',
+                'error': f'No book found for ASIN {asin} in any available region. The ASIN may be invalid, not an audiobook, or not in the Audnexus database.',
                 'result': None
             })
     except Exception as e:
