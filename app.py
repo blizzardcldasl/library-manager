@@ -4183,37 +4183,51 @@ def deep_scan_library(config):
 
         # Track file signatures for duplicate detection
         # NOTE: For large libraries (10k+ files), this can be slow - process in batches with progress
+        # For very large libraries (>20k files), we can skip detailed duplicate detection to speed up scan
         total_files = len(all_audio_files)
-        logger.info(f"Processing {total_files} files for duplicate detection...")
+        enable_duplicate_detection = total_files < 20000 or config.get('enable_duplicate_detection', True)
         
-        batch_size = 1000
-        for i, audio_file in enumerate(all_audio_files):
-            # Log progress every 1000 files
-            if i > 0 and i % batch_size == 0:
-                logger.info(f"Processed {i}/{total_files} files for duplicate detection...")
-            
-            try:
-                sig = get_file_signature(audio_file)
-                if sig:
-                    if sig not in file_signatures:
-                        file_signatures[sig] = []
-                    file_signatures[sig].append(audio_file)
+        if enable_duplicate_detection:
+            logger.info(f"Processing {total_files} files for duplicate detection...")
+            batch_size = 1000
+            for i, audio_file in enumerate(all_audio_files):
+                # Log progress every 1000 files
+                if i > 0 and i % batch_size == 0:
+                    logger.info(f"Processed {i}/{total_files} files for duplicate detection...")
+                
+                try:
+                    sig = get_file_signature(audio_file)
+                    if sig:
+                        if sig not in file_signatures:
+                            file_signatures[sig] = []
+                        file_signatures[sig].append(audio_file)
 
-                basename = os.path.basename(audio_file).lower()
-                if basename not in file_names:
-                    file_names[basename] = []
-                file_names[basename].append(audio_file)
-            except OSError as e:
-                if e.errno == 116:  # Stale file handle
-                    logger.debug(f"Stale file handle when processing {audio_file}, skipping")
-                else:
-                    logger.debug(f"OSError processing {audio_file}: {e}")
-                continue
-            except Exception as e:
-                logger.debug(f"Error processing {audio_file}: {e}")
-                continue
-        
-        logger.info(f"Completed duplicate detection processing for {total_files} files")
+                    basename = os.path.basename(audio_file).lower()
+                    if basename not in file_names:
+                        file_names[basename] = []
+                    file_names[basename].append(audio_file)
+                except OSError as e:
+                    if e.errno == 116:  # Stale file handle
+                        logger.debug(f"Stale file handle when processing {audio_file}, skipping")
+                    else:
+                        logger.debug(f"OSError processing {audio_file}: {e}")
+                    continue
+                except Exception as e:
+                    logger.debug(f"Error processing {audio_file}: {e}")
+                    continue
+            
+            logger.info(f"Completed duplicate detection processing for {total_files} files")
+        else:
+            logger.info(f"Skipping detailed duplicate detection for large library ({total_files} files). Use 'enable_duplicate_detection: true' in config to enable.")
+            # Still track basenames for quick duplicate detection
+            for audio_file in all_audio_files:
+                try:
+                    basename = os.path.basename(audio_file).lower()
+                    if basename not in file_names:
+                        file_names[basename] = []
+                    file_names[basename].append(audio_file)
+                except Exception:
+                    continue
 
         # NEW: Detect loose files in library root (no folder structure)
         loose_files = []
