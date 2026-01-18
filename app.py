@@ -1217,12 +1217,17 @@ def lookup_book_metadata(messy_name, config, folder_path=None):
             return None
         return result
 
-    # 0. Try BookDB first (our private metadata service with fuzzy matching)
+    # 0. Try BookDB first (optional - our private metadata service with fuzzy matching)
+    # Note: This is optional and won't block other APIs if it fails
     bookdb_key = config.get('bookdb_api_key')
     if bookdb_key:
-        result = validate_result(search_bookdb(clean_title, author=author_hint, api_key=bookdb_key), clean_title)
-        if result:
-            return result
+        try:
+            result = validate_result(search_bookdb(clean_title, author=author_hint, api_key=bookdb_key), clean_title)
+            if result:
+                return result
+        except Exception as e:
+            logger.debug(f"BookDB search failed (non-blocking): {e}")
+            # Continue to other APIs
 
     # 1. Try Audnexus (best for audiobooks, pulls from Audible)
     result = validate_result(search_audnexus(clean_title, author=author_hint), clean_title)
@@ -2277,6 +2282,8 @@ def search_bookdb_api(title):
     Uses Qdrant vector search - fast even with 50M books.
     Returns dict with author, title, series if found.
     Filters garbage matches using title similarity.
+    
+    NOTE: This is an optional service. Timeouts are handled gracefully and won't block other APIs.
     """
     # Clean the search title (remove "audiobook", file extensions, etc.)
     search_title = clean_search_title(title)
@@ -2289,21 +2296,13 @@ def search_bookdb_api(title):
         return None
 
     try:
-        # Use longer timeout for cold start (embedding model can take 45-60s to load)
-        # Retry once on timeout
-        for attempt in range(2):
-            try:
-                response = requests.get(
-                    f"{BOOKDB_API_URL}/search",
-                    params={"q": search_title, "limit": 5},
-                    timeout=60 if attempt == 0 else 30
-                )
-                break
-            except requests.exceptions.Timeout:
-                if attempt == 0:
-                    logger.debug(f"BookDB API timeout on first attempt, retrying...")
-                    continue
-                raise
+        # Use shorter timeout to avoid blocking - BookBucket is optional
+        # Reduced from 60s to 10s to fail fast and continue to other APIs
+        response = requests.get(
+            f"{BOOKDB_API_URL}/search",
+            params={"q": search_title, "limit": 5},
+            timeout=10  # Fail fast - don't block other APIs
+        )
 
         if response.status_code == 200:
             results = response.json()
@@ -2686,21 +2685,28 @@ def handle_chaos_library(lib_path, config=None):
 
         # Level 2: Search by detected title/filename
         elif title:
-            # Try BookBucket API first (50M books, public endpoint, fast)
-            search_progress.set_status(f"Searching BookDB for '{title[:30]}...'")
-            api_result = search_bookdb_api(title)
-            if api_result and api_result.get('author'):
-                author = api_result.get('author')
-                title = api_result.get('title') or title
-                confidence = 'high'
-                result['identification'] = 'bookdb_api'
-                search_progress.set_status(f"Found in BookDB: {author}")
-                if api_result.get('series'):
-                    result['series'] = api_result.get('series')
+            # Try BookBucket API first (optional - 50M books, public endpoint)
+            # If it times out or fails, we'll continue to AI
+            search_progress.set_status(f"Searching BookBucket for '{title[:30]}...'")
+            try:
+                api_result = search_bookdb_api(title)
+                if api_result and api_result.get('author'):
+                    author = api_result.get('author')
+                    title = api_result.get('title') or title
+                    confidence = 'high'
+                    result['identification'] = 'bookdb_api'
+                    search_progress.set_status(f"Found in BookBucket: {author}")
+                    if api_result.get('series'):
+                        result['series'] = api_result.get('series')
+            except Exception as e:
+                # BookBucket failed - continue to AI (non-blocking)
+                logger.debug(f"BookBucket search failed, continuing to AI: {e}")
+                search_progress.set_status(f"BookBucket unavailable, trying AI for '{title[:30]}...'")
 
-            # Fall back to AI if API didn't find it
+            # Fall back to AI if API didn't find it or failed
             if not author:
-                search_progress.set_status(f"BookDB no match, trying AI for '{title[:30]}...'")
+                if not search_progress.get_state().get('status_message', '').startswith('BookBucket unavailable'):
+                    search_progress.set_status(f"BookBucket no match, trying AI for '{title[:30]}...'")
                 ai_result = identify_book_with_ai(group, config)
                 if ai_result and ai_result.get('author'):
                     author = ai_result.get('author')
