@@ -89,5 +89,8 @@ This creates a report with:
 
 ### Still Stuck?
 
-- [GitHub Issues](https://github.com/deucebucket/library-manager/issues)
+> **Note:** This is a fork. For original project issues, see [deucebucket/library-manager](https://github.com/deucebucket/library-manager/issues).
+
+- [GitHub Issues (Fork)](https://github.com/blizzardcldasl/library-manager/issues)
+- [Original Project Issues](https://github.com/deucebucket/library-manager/issues)
 - [GitHub Discussions](https://github.com/deucebucket/library-manager/discussions)

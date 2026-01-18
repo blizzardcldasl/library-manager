@@ -1,10 +1,12 @@
 # Installation
 
+> **Note:** This is a fork of [deucebucket/library-manager](https://github.com/deucebucket/library-manager). See [FORK_NOTES.md](../../FORK_NOTES.md) for changes.
+
 ## Quick Start (Python)
 
 ```bash
-# Clone the repo
-git clone https://github.com/deucebucket/library-manager.git
+# Clone the repo (fork)
+git clone https://github.com/blizzardcldasl/library-manager.git
 cd library-manager
 
 # Install dependencies
@@ -21,7 +23,7 @@ Open **http://localhost:5757** in your browser.
 See [[Docker Setup]] for complete Docker instructions including UnRaid, Synology, and Portainer.
 
 ```bash
-git clone https://github.com/deucebucket/library-manager.git
+git clone https://github.com/blizzardcldasl/library-manager.git
 cd library-manager
 
 # Edit docker-compose.yml with your audiobook path

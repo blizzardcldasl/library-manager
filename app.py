@@ -364,7 +364,32 @@ logger = logging.getLogger(__name__)
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
 app = Flask(__name__)
-app.secret_key = 'library-manager-secret-key-2024'
+
+# Generate or load secret key for session security
+SECRET_KEY_FILE = DATA_DIR / '.secret_key'
+if SECRET_KEY_FILE.exists():
+    try:
+        with open(SECRET_KEY_FILE, 'r') as f:
+            app.secret_key = f.read().strip()
+    except Exception as e:
+        logger.warning(f"Could not read secret key file: {e}, generating new one")
+        import secrets
+        app.secret_key = secrets.token_hex(32)
+        try:
+            with open(SECRET_KEY_FILE, 'w') as f:
+                f.write(app.secret_key)
+            os.chmod(SECRET_KEY_FILE, 0o600)  # Read/write for owner only
+        except Exception as e:
+            logger.error(f"Could not write secret key file: {e}")
+else:
+    import secrets
+    app.secret_key = secrets.token_hex(32)
+    try:
+        with open(SECRET_KEY_FILE, 'w') as f:
+            f.write(app.secret_key)
+        os.chmod(SECRET_KEY_FILE, 0o600)  # Read/write for owner only
+    except Exception as e:
+        logger.warning(f"Could not write secret key file: {e}, using in-memory key")
 
 # ============== CONFIGURATION ==============
 
@@ -436,7 +461,7 @@ def init_db():
     # Add error_message column if it doesn't exist (migration)
     try:
         c.execute('ALTER TABLE books ADD COLUMN error_message TEXT')
-    except:
+    except sqlite3.OperationalError:
         pass  # Column already exists
 
     # Queue table - books needing AI analysis
@@ -468,11 +493,11 @@ def init_db():
     # Add status and error_message columns if they don't exist (migration)
     try:
         c.execute("ALTER TABLE history ADD COLUMN status TEXT DEFAULT 'pending_fix'")
-    except:
+    except sqlite3.OperationalError:
         pass
     try:
         c.execute('ALTER TABLE history ADD COLUMN error_message TEXT')
-    except:
+    except sqlite3.OperationalError:
         pass
 
     # Stats table - daily stats
@@ -1600,7 +1625,7 @@ def call_openrouter(prompt, config):
                 detail = resp.json().get('error', {}).get('message', '')
                 if detail:
                     logger.warning(f"OpenRouter detail: {detail}")
-            except:
+            except (ValueError, KeyError, json.JSONDecodeError, AttributeError):
                 pass
     except requests.exceptions.Timeout:
         logger.error("OpenRouter: Request timed out after 90 seconds")
@@ -1648,7 +1673,7 @@ def call_gemini(prompt, config, retry_count=0):
                         logger.info(f"Gemini: Waiting {wait_time:.0f} seconds before retry...")
                         time.sleep(wait_time)
                         return call_gemini(prompt, config, retry_count + 1)
-            except:
+            except (ValueError, KeyError, json.JSONDecodeError, AttributeError):
                 pass
             # Default wait if we can't parse the time
             wait_time = 45 * (retry_count + 1)
@@ -1662,7 +1687,7 @@ def call_gemini(prompt, config, retry_count=0):
                 detail = resp.json().get('error', {}).get('message', '')
                 if detail:
                     logger.warning(f"Gemini detail: {detail}")
-            except:
+            except (ValueError, KeyError, json.JSONDecodeError, AttributeError):
                 pass
     except requests.exceptions.Timeout:
         logger.error("Gemini: Request timed out after 90 seconds")
@@ -3453,7 +3478,7 @@ def get_file_signature(filepath, sample_size=8192):
             sample = f.read(sample_size)
         partial_hash = hashlib.md5(sample).hexdigest()[:16]
         return f"{size}_{partial_hash}"
-    except:
+    except (OSError, PermissionError, FileNotFoundError):
         return None
 
 
@@ -5011,7 +5036,7 @@ def api_check_path():
                 if entry_info['is_file']:
                     try:
                         entry_info['size'] = os.path.getsize(entry_path)
-                    except:
+                    except (OSError, PermissionError, FileNotFoundError):
                         entry_info['size'] = 0
                 result['contents'].append(entry_info)
 
@@ -6716,7 +6741,7 @@ def load_groups():
                     if key not in data:
                         data[key] = default
                 return data
-        except:
+        except (json.JSONDecodeError, KeyError, TypeError):
             pass
     return DEFAULT_GROUPS_DATA.copy()
 

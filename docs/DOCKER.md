@@ -24,8 +24,10 @@ Complete guide for running Library Manager in Docker, with specific instructions
 
 ### 1. Clone the Repository
 
+**Note:** This is a fork. For the original project, see [deucebucket/library-manager](https://github.com/deucebucket/library-manager).
+
 ```bash
-git clone https://github.com/deucebucket/library-manager.git
+git clone https://github.com/blizzardcldasl/library-manager.git
 cd library-manager
 ```
 
@@ -365,6 +367,7 @@ Or with Dockge/Portainer, redeploy the stack.
 
 ## Getting Help
 
-- **GitHub Issues:** [Report a bug](https://github.com/deucebucket/library-manager/issues)
+- **GitHub Issues (Fork):** [Report a bug](https://github.com/blizzardcldasl/library-manager/issues)
+- **Original Project Issues:** [deucebucket/library-manager](https://github.com/deucebucket/library-manager/issues)
 - **Check logs:** `docker logs library-manager`
 - **Enter container:** `docker exec -it library-manager /bin/bash`

@@ -44,5 +44,8 @@ Library Manager automatically fixes messy audiobook folder names using real book
 
 ## Getting Help
 
-- [GitHub Issues](https://github.com/deucebucket/library-manager/issues) - Bug reports
+> **Note:** This is a fork. For original project help, see [deucebucket/library-manager](https://github.com/deucebucket/library-manager).
+
+- [GitHub Issues (Fork)](https://github.com/blizzardcldasl/library-manager/issues) - Bug reports
+- [Original Project Issues](https://github.com/deucebucket/library-manager/issues) - Original project bug reports
 - [GitHub Discussions](https://github.com/deucebucket/library-manager/discussions) - Questions & ideas

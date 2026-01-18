@@ -1,11 +1,13 @@
 # Docker Setup
 
+> **Note:** This is a fork of [deucebucket/library-manager](https://github.com/deucebucket/library-manager). See [FORK_NOTES.md](../../FORK_NOTES.md) for changes.
+
 Complete guide for running Library Manager in Docker.
 
 ## Quick Start
 
 ```bash
-git clone https://github.com/deucebucket/library-manager.git
+git clone https://github.com/blizzardcldasl/library-manager.git
 cd library-manager
 
 # Edit docker-compose.yml - change the audiobook path
