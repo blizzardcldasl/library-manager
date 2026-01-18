@@ -3832,8 +3832,11 @@ def scan_folder_recursive(folder_path, library_root, config, conn, c,
         # Depth 2+ - could be series, book title, or nested structure
         folder_title = folder_name
         
-        # Check if this looks like a series folder (has multiple numbered book subfolders)
-        if len(subdirs) >= 2:
+        # Check if this looks like a series folder
+        # Criteria: Has subdirectories AND (has 2+ numbered books OR subdirs contain series info)
+        is_series_folder = False
+        if subdirs:
+            # Pattern 1: Multiple numbered book subfolders (e.g., "Book 1", "Book 2")
             book_folder_patterns = [
                 r'^\d+\s*[-–—:.]?\s*\w', r'^#?\d+\s*[-–—:]',
                 r'book\s*\d+', r'vol(ume)?\s*\d+', r'part\s*\d+'
@@ -3843,29 +3846,45 @@ def scan_folder_recursive(folder_path, library_root, config, conn, c,
                 if any(re.search(p, d.name, re.IGNORECASE) for p in book_folder_patterns)
             )
             
-            if book_like_count >= 2:
-                # This is a series folder - recurse into it
-                logger.debug(f"Detected series folder: {path_str} (contains {book_like_count} book subfolders)")
-                for subdir in subdirs:
-                    s, q, i = scan_folder_recursive(subdir, library_root, config, conn, c,
-                                                    author_context=author_context,
-                                                    series_context=folder_title,
-                                                    depth=depth+1, max_depth=max_depth)
-                    scanned += s
-                    queued += q
-                    issues_found.update(i)
-                
-                # Mark series folder in database
-                c.execute('SELECT id FROM books WHERE path = ?', (path_str,))
-                existing = c.fetchone()
-                if existing:
-                    c.execute('UPDATE books SET status = ? WHERE id = ?', ('series_folder', existing['id']))
-                else:
-                    c.execute('''INSERT INTO books (path, current_author, current_title, status)
-                                 VALUES (?, ?, ?, 'series_folder')''',
-                             (path_str, author_context or 'Unknown', folder_title))
-                conn.commit()
-                return scanned, queued, issues_found
+            # Pattern 2: Subdirectories contain series info in their names
+            # Examples: "Book Title (Series Name #1)", "Book Title - Series #1"
+            series_info_patterns = [
+                r'\([^)]*#\s*\d+',  # Contains (#1) or (Series #1)
+                r'\([^)]*\s+series\s+#?\d+',  # Contains (Series 1)
+                r'[-–—]\s*[^#]*#\s*\d+',  # Contains - Series #1
+            ]
+            has_series_info = any(
+                any(re.search(p, d.name, re.IGNORECASE) for p in series_info_patterns)
+                for d in subdirs
+            )
+            
+            # If we have 2+ numbered books OR subdirs contain series info, treat as series folder
+            if book_like_count >= 2 or (len(subdirs) >= 1 and has_series_info):
+                is_series_folder = True
+                logger.debug(f"Detected series folder: {path_str} (has {len(subdirs)} subdirs, {book_like_count} numbered, series_info={has_series_info})")
+        
+        if is_series_folder:
+            # This is a series folder - recurse into it
+            for subdir in subdirs:
+                s, q, i = scan_folder_recursive(subdir, library_root, config, conn, c,
+                                                author_context=author_context,
+                                                series_context=folder_title,
+                                                depth=depth+1, max_depth=max_depth)
+                scanned += s
+                queued += q
+                issues_found.update(i)
+            
+            # Mark series folder in database
+            c.execute('SELECT id FROM books WHERE path = ?', (path_str,))
+            existing = c.fetchone()
+            if existing:
+                c.execute('UPDATE books SET status = ? WHERE id = ?', ('series_folder', existing['id']))
+            else:
+                c.execute('''INSERT INTO books (path, current_author, current_title, status)
+                             VALUES (?, ?, ?, 'series_folder')''',
+                         (path_str, author_context or 'Unknown', folder_title))
+            conn.commit()
+            return scanned, queued, issues_found
         
         # This appears to be a book folder (has audio files or is leaf node)
         # Analyze the folder structure
