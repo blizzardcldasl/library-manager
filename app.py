@@ -7138,7 +7138,7 @@ def api_search_all_apis():
         'success': True,
         'results_by_source': results_by_source,
         'total_count': total_count,
-        'sources_searched': len([api for api, _ in apis])
+        'sources_searched': len(apis) + 1  # +1 for BookBucket API search
     })
 
 
