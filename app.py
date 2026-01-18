@@ -7096,7 +7096,8 @@ def api_search_bookdb():
     except requests.exceptions.ConnectionError:
         return jsonify({'error': 'BookBucket API not available. The metadata database may be temporarily down for maintenance.', 'results': []})
     except Exception as e:
-        logger.error(f"BookBucket search error: {e}")
+        # Log as warning, not error - BookBucket is optional
+        logger.warning(f"BookBucket search error (non-blocking): {e}")
         return jsonify({'error': str(e), 'results': []})
 
 
