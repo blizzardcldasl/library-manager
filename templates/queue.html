@@ -35,10 +35,17 @@
 <div class="card mb-4">
     <div class="card-header d-flex justify-content-between">
         <span><i class="bi bi-terminal"></i> Live Log</span>
-        <button class="btn btn-sm btn-outline-secondary" onclick="clearLog()">Clear</button>
+        <div>
+            <button class="btn btn-sm btn-outline-secondary me-2" onclick="toggleAutoScroll()" id="autoscroll-btn" title="Toggle auto-scroll to bottom">
+                <i class="bi bi-arrow-down-circle"></i> Auto-scroll
+            </button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="clearLog()" title="Clear log">
+                <i class="bi bi-x-circle"></i> Clear
+            </button>
+        </div>
     </div>
-    <div class="card-body bg-dark" style="max-height: 200px; overflow-y: auto;">
-        <pre id="debug-log" class="text-success mb-0" style="font-size: 0.85rem;"></pre>
+    <div class="card-body bg-dark p-2" id="log-container" style="height: 200px; overflow-y: auto; overflow-x: hidden; scroll-behavior: smooth;">
+        <pre id="debug-log" class="text-success mb-0" style="font-size: 0.85rem; white-space: pre-wrap; word-wrap: break-word; margin: 0;"></pre>
     </div>
 </div>
 
@@ -246,16 +253,48 @@
 <script>
 let isProcessing = false;
 let pollInterval = null;
+let autoScrollEnabled = true;
 
 function log(msg) {
     const logEl = document.getElementById('debug-log');
+    const logContainer = document.getElementById('log-container');
     const time = new Date().toLocaleTimeString();
     logEl.innerHTML += `[${time}] ${msg}\n`;
-    logEl.scrollTop = logEl.scrollHeight;
+    
+    // Scroll the container, not the pre element
+    if (autoScrollEnabled) {
+        // Use setTimeout to ensure DOM is updated before scrolling
+        setTimeout(() => {
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }, 0);
+    }
 }
 
 function clearLog() {
     document.getElementById('debug-log').innerHTML = '';
+    // Reset scroll position
+    const logContainer = document.getElementById('log-container');
+    logContainer.scrollTop = 0;
+}
+
+function toggleAutoScroll() {
+    autoScrollEnabled = !autoScrollEnabled;
+    const btn = document.getElementById('autoscroll-btn');
+    const logContainer = document.getElementById('log-container');
+    
+    if (autoScrollEnabled) {
+        btn.innerHTML = '<i class="bi bi-arrow-down-circle"></i> Auto-scroll';
+        btn.classList.remove('btn-warning');
+        btn.classList.add('btn-outline-secondary');
+        // Scroll to bottom when re-enabling
+        setTimeout(() => {
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }, 0);
+    } else {
+        btn.innerHTML = '<i class="bi bi-pause-circle"></i> Paused';
+        btn.classList.remove('btn-outline-secondary');
+        btn.classList.add('btn-warning');
+    }
 }
 
 function showProcessingBanner(show) {
