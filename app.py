@@ -365,7 +365,14 @@ logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
 app = Flask(__name__)
 
-# Generate or load secret key for session security
+# ============== CONFIGURATION ==============
+
+BASE_DIR = Path(__file__).parent
+# Support DATA_DIR env var for Docker persistence, default to app directory
+DATA_DIR = Path(os.environ.get('DATA_DIR', BASE_DIR))
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+# Generate or load secret key for session security (after DATA_DIR is defined)
 SECRET_KEY_FILE = DATA_DIR / '.secret_key'
 if SECRET_KEY_FILE.exists():
     try:
@@ -390,13 +397,6 @@ else:
         os.chmod(SECRET_KEY_FILE, 0o600)  # Read/write for owner only
     except Exception as e:
         logger.warning(f"Could not write secret key file: {e}, using in-memory key")
-
-# ============== CONFIGURATION ==============
-
-BASE_DIR = Path(__file__).parent
-# Support DATA_DIR env var for Docker persistence, default to app directory
-DATA_DIR = Path(os.environ.get('DATA_DIR', BASE_DIR))
-DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 DB_PATH = DATA_DIR / 'library.db'
 CONFIG_PATH = DATA_DIR / 'config.json'
