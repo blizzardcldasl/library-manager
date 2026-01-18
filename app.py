@@ -4196,9 +4196,20 @@ def deep_scan_library(config):
 
         # NEW: Detect loose files in library root (no folder structure)
         loose_files = []
-        for item in lib_path.iterdir():
-            if item.is_file() and item.suffix.lower() in AUDIO_EXTENSIONS:
-                loose_files.append(item)
+        try:
+            for item in lib_path.iterdir():
+                if item.is_file() and item.suffix.lower() in AUDIO_EXTENSIONS:
+                    loose_files.append(item)
+        except OSError as e:
+            if e.errno == 116:  # Stale file handle
+                logger.error(f"Stale file handle when reading library directory: {lib_path}. The filesystem may be unmounted or unavailable.")
+                continue
+            else:
+                logger.error(f"OSError reading library directory {lib_path}: {e}")
+                continue
+        except Exception as e:
+            logger.error(f"Unexpected error reading library directory {lib_path}: {e}")
+            continue
 
         if loose_files:
             logger.info(f"Found {len(loose_files)} loose audio files in library root")
@@ -4234,9 +4245,17 @@ def deep_scan_library(config):
         # NEW: Detect loose EBOOK files in library root (when ebook management enabled)
         if config.get('ebook_management', False):
             loose_ebooks = []
-            for item in lib_path.iterdir():
-                if item.is_file() and item.suffix.lower() in EBOOK_EXTENSIONS:
-                    loose_ebooks.append(item)
+            try:
+                for item in lib_path.iterdir():
+                    if item.is_file() and item.suffix.lower() in EBOOK_EXTENSIONS:
+                        loose_ebooks.append(item)
+            except OSError as e:
+                if e.errno == 116:  # Stale file handle
+                    logger.error(f"Stale file handle when reading library directory for ebooks: {lib_path}. The filesystem may be unmounted or unavailable.")
+                else:
+                    logger.error(f"OSError reading library directory for ebooks {lib_path}: {e}")
+            except Exception as e:
+                logger.error(f"Unexpected error reading library directory for ebooks {lib_path}: {e}")
 
             if loose_ebooks:
                 logger.info(f"Found {len(loose_ebooks)} loose ebook files in library root")
