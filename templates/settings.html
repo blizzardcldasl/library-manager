@@ -684,7 +684,7 @@ function generateBugReport() {
 function copyBugReport() {
     document.getElementById('bug-report-text').select();
     document.execCommand('copy');
-    alert('Copied!');
+    showSuccess('Bug report copied to clipboard!', 'Copied');
 }
 
 setInterval(refreshLogs, 10000);
@@ -725,7 +725,7 @@ function restoreBackup() {
     const fileInput = form.querySelector('input[name="backup"]');
 
     if (!fileInput.files || fileInput.files.length === 0) {
-        alert('Please select a backup file');
+        showWarning('Please select a backup file to restore.', 'No File Selected');
         return;
     }
 
@@ -743,18 +743,18 @@ function restoreBackup() {
     .then(r => r.json())
     .then(data => {
         if (data.success) {
-            alert(data.message + '\n\nRestored: ' + data.restored.join(', '));
+            showSuccess(`Restore complete! Restored: ${data.restored.join(', ')}`, 'Restore Complete');
             restoreModal.hide();
             // Offer to reload
             if (confirm('Reload page to apply restored settings?')) {
                 location.reload();
             }
         } else {
-            alert('Restore failed: ' + (data.error || 'Unknown error'));
+            showErrorWithHelp('Restore failed: ' + (data.error || 'Unknown error'), 'file');
         }
     })
     .catch(e => {
-        alert('Restore error: ' + e);
+        showErrorWithHelp('Restore error: ' + e, 'api');
     });
 }
 

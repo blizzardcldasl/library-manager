@@ -405,18 +405,18 @@
                         document.getElementById('update-badge').style.display = 'inline-block';
                         document.getElementById('version-badge').classList.remove('bg-secondary');
                         document.getElementById('version-badge').classList.add('bg-warning');
-                    } else if (showAlert) {
+                    } else                     if (showAlert) {
                         if (data.error) {
-                            alert('Update check failed: ' + data.error);
+                            showErrorWithHelp('Update check failed: ' + data.error, 'api');
                         } else if (data.message) {
-                            alert(data.message);
+                            showInfo(data.message, 'Update Check');
                         } else {
-                            alert('You are running the latest version! (v' + data.current + ')');
+                            showSuccess('You are running the latest version! (v' + data.current + ')', 'Up to Date');
                         }
                     }
                 })
                 .catch(e => {
-                    if (showAlert) alert('Update check failed: ' + e);
+                    if (showAlert) showErrorWithHelp('Update check failed: ' + e, 'api');
                 });
         }
 
@@ -517,6 +517,205 @@
                     progressText.innerHTML = '<i class="bi bi-check-circle text-success"></i> Restarting... Page will reload in 5 seconds.';
                     setTimeout(() => { window.location.reload(); }, 5000);
                 });
+        }
+    </script>
+    <!-- Toast Container -->
+    <div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 1055;">
+        <!-- Toasts will be inserted here -->
+    </div>
+
+    <script>
+        // ============== TOAST NOTIFICATION SYSTEM ==============
+        function showToast(message, type = 'info', duration = 5000, title = null, details = null, link = null) {
+            const toastContainer = document.querySelector('.toast-container');
+            if (!toastContainer) return;
+
+            const toastId = 'toast-' + Date.now();
+            const icons = {
+                success: 'bi-check-circle',
+                error: 'bi-exclamation-triangle',
+                warning: 'bi-exclamation-circle',
+                info: 'bi-info-circle'
+            };
+            const bgColors = {
+                success: 'bg-success',
+                error: 'bg-danger',
+                warning: 'bg-warning',
+                info: 'bg-info'
+            };
+
+            const toastHtml = `
+                <div id="${toastId}" class="toast" role="alert" aria-live="assertive" aria-atomic="true" data-bs-autohide="true" data-bs-delay="${duration}">
+                    <div class="toast-header ${bgColors[type] || 'bg-dark'} text-white">
+                        <i class="bi ${icons[type] || icons.info} me-2"></i>
+                        <strong class="me-auto">${title || type.charAt(0).toUpperCase() + type.slice(1)}</strong>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast" aria-label="Close"></button>
+                    </div>
+                    <div class="toast-body bg-dark text-light">
+                        ${message}
+                        ${details ? `<div class="mt-2 small text-muted">${details}</div>` : ''}
+                        ${link ? `<div class="mt-2"><a href="${link.url}" target="_blank" class="btn btn-sm btn-outline-light">${link.text}</a></div>` : ''}
+                    </div>
+                </div>
+            `;
+
+            toastContainer.insertAdjacentHTML('beforeend', toastHtml);
+            const toastElement = document.getElementById(toastId);
+            const toast = new bootstrap.Toast(toastElement);
+            toast.show();
+
+            // Remove element after it's hidden
+            toastElement.addEventListener('hidden.bs.toast', () => {
+                toastElement.remove();
+            });
+        }
+
+        // Convenience functions
+        function showSuccess(message, title = 'Success', duration = 3000) {
+            showToast(message, 'success', duration, title);
+        }
+
+        function showError(message, title = 'Error', details = null, link = null, duration = 8000) {
+            showToast(message, 'error', duration, title, details, link);
+        }
+
+        function showWarning(message, title = 'Warning', details = null, duration = 6000) {
+            showToast(message, 'warning', duration, title, details);
+        }
+
+        function showInfo(message, title = 'Info', duration = 4000) {
+            showToast(message, 'info', duration, title);
+        }
+
+        // ============== ERROR MESSAGE HELPER WITH TROUBLESHOOTING ==============
+        function getErrorHelp(errorMessage, errorType = null) {
+            const helpMap = {
+                'api key': {
+                    message: 'API key is missing or invalid',
+                    details: 'Go to Settings → AI Setup and add your API key. For Gemini, get a free key at https://aistudio.google.com',
+                    link: { url: '/settings', text: 'Go to Settings' }
+                },
+                'rate limit': {
+                    message: 'Too many API requests',
+                    details: 'The AI service is rate limiting requests. Wait a few minutes and try again, or reduce the batch size in Settings.',
+                    link: { url: '/settings', text: 'Adjust Settings' }
+                },
+                'connection': {
+                    message: 'Connection failed',
+                    details: 'Check your internet connection and try again. If using Docker, ensure the container has network access.',
+                    link: { url: '/docs/Troubleshooting.md', text: 'Troubleshooting Guide' }
+                },
+                'path': {
+                    message: 'Path not found or inaccessible',
+                    details: 'In Docker: Make sure you mounted the path in docker-compose.yml. In Settings, use the container path (e.g., /audiobooks), not the host path.',
+                    link: { url: '/docs/Docker-Setup.md', text: 'Docker Setup Guide' }
+                },
+                'permission': {
+                    message: 'Permission denied',
+                    details: 'The application cannot read/write to this path. Check folder permissions and ensure the user running the app has access.',
+                    link: { url: '/docs/Troubleshooting.md', text: 'Troubleshooting Guide' }
+                },
+                'database': {
+                    message: 'Database error',
+                    details: 'The database may be locked or corrupted. Try restarting the application. If the problem persists, check the logs.',
+                    link: { url: '/settings', text: 'View Logs' }
+                }
+            };
+
+            const lowerError = errorMessage.toLowerCase();
+            for (const [key, help] of Object.entries(helpMap)) {
+                if (lowerError.includes(key)) {
+                    return help;
+                }
+            }
+
+            // Generic help
+            return {
+                message: errorMessage,
+                details: 'If this problem persists, check the logs in Settings → Advanced or generate a bug report.',
+                link: { url: '/settings', text: 'View Settings' }
+            };
+        }
+
+        function showErrorWithHelp(errorMessage, errorType = null) {
+            const help = getErrorHelp(errorMessage, errorType);
+            showError(help.message, 'Error', help.details, help.link);
+        }
+
+        // ============== LOADING INDICATOR SYSTEM ==============
+        function showLoadingIndicator(targetElement, message = 'Loading...', replaceContent = false) {
+            const loadingHtml = `
+                <div class="text-center py-4">
+                    <div class="spinner-border text-primary mb-2" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="text-muted mb-0">${message}</p>
+                </div>
+            `;
+
+            if (replaceContent) {
+                targetElement.innerHTML = loadingHtml;
+            } else {
+                const loadingDiv = document.createElement('div');
+                loadingDiv.className = 'loading-indicator';
+                loadingDiv.innerHTML = loadingHtml;
+                targetElement.appendChild(loadingDiv);
+            }
+            return targetElement.querySelector('.loading-indicator') || targetElement;
+        }
+
+        function hideLoadingIndicator(targetElement) {
+            const indicator = targetElement.querySelector('.loading-indicator');
+            if (indicator) {
+                indicator.remove();
+            }
+        }
+
+        // ============== PROGRESS BAR SYSTEM ==============
+        function createProgressBar(containerId, label = 'Progress') {
+            const container = document.getElementById(containerId);
+            if (!container) return null;
+
+            const progressHtml = `
+                <div class="progress-container mb-3">
+                    <div class="d-flex justify-content-between mb-1">
+                        <span class="text-muted">${label}</span>
+                        <span class="text-muted" id="${containerId}-percent">0%</span>
+                    </div>
+                    <div class="progress" style="height: 25px;">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                             role="progressbar" 
+                             id="${containerId}-bar"
+                             style="width: 0%"
+                             aria-valuenow="0" 
+                             aria-valuemin="0" 
+                             aria-valuemax="100">
+                            <span id="${containerId}-text">0 / 0</span>
+                        </div>
+                    </div>
+                    <div class="mt-1 small text-muted" id="${containerId}-status">Starting...</div>
+                </div>
+            `;
+
+            container.innerHTML = progressHtml;
+            return {
+                update: (current, total, status = null) => {
+                    const percent = total > 0 ? Math.round((current / total) * 100) : 0;
+                    document.getElementById(`${containerId}-bar`).style.width = percent + '%';
+                    document.getElementById(`${containerId}-bar`).setAttribute('aria-valuenow', percent);
+                    document.getElementById(`${containerId}-percent`).textContent = percent + '%';
+                    document.getElementById(`${containerId}-text`).textContent = `${current} / ${total}`;
+                    if (status) {
+                        document.getElementById(`${containerId}-status`).textContent = status;
+                    }
+                },
+                remove: () => {
+                    const progressContainer = container.querySelector('.progress-container');
+                    if (progressContainer) {
+                        progressContainer.remove();
+                    }
+                }
+            };
         }
     </script>
     {% block scripts %}{% endblock %}

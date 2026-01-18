@@ -154,10 +154,10 @@ function applyFix(historyId) {
         .then(r => r.json())
         .then(data => {
             if (data.success) {
-                alert('Fix applied successfully!');
-                location.reload();
+                showSuccess('Fix applied successfully!', 'Fix Applied');
+                setTimeout(() => location.reload(), 1500);
             } else {
-                alert('Error: ' + data.message);
+                showErrorWithHelp(data.message || 'Unknown error', 'file');
             }
         });
 }
@@ -169,13 +169,13 @@ function undoFix(historyId) {
         .then(r => r.json())
         .then(data => {
             if (data.success) {
-                alert(data.message);
-                location.reload();
+                showSuccess(data.message || 'Fix applied successfully.', 'Fix Applied');
+                setTimeout(() => location.reload(), 1500);
             } else {
-                alert('Error: ' + (data.error || 'Unknown error'));
+                showErrorWithHelp(data.error || 'Unknown error', 'file');
             }
         })
-        .catch(e => alert('Error: ' + e));
+        .catch(e => showErrorWithHelp('Error: ' + e, 'api'));
 }
 
 function rejectFix(historyId) {
@@ -185,13 +185,13 @@ function rejectFix(historyId) {
         .then(r => r.json())
         .then(data => {
             if (data.success) {
-                alert('Fix rejected - book marked as OK');
-                location.reload();
+                showSuccess('Fix rejected - book marked as OK', 'Rejected');
+                setTimeout(() => location.reload(), 1500);
             } else {
-                alert('Error: ' + (data.error || 'Unknown error'));
+                showErrorWithHelp(data.error || 'Unknown error', 'database');
             }
         })
-        .catch(e => alert('Error: ' + e));
+        .catch(e => showErrorWithHelp('Error: ' + e, 'api'));
 }
 
 function dismissError(historyId) {
@@ -201,12 +201,13 @@ function dismissError(historyId) {
         .then(r => r.json())
         .then(data => {
             if (data.success) {
-                location.reload();
+                showSuccess('Error entry dismissed', 'Dismissed');
+                setTimeout(() => location.reload(), 1000);
             } else {
-                alert('Error: ' + (data.error || 'Unknown error'));
+                showErrorWithHelp(data.error || 'Unknown error', 'database');
             }
         })
-        .catch(e => alert('Error: ' + e));
+        .catch(e => showErrorWithHelp('Error: ' + e, 'api'));
 }
 </script>
 {% endblock %}

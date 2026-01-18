@@ -451,7 +451,7 @@ function editItem(queueId, author, title) {
 function searchBookDB() {
     const query = document.getElementById('search-query').value.trim();
     if (query.length < 2) {
-        alert('Search query must be at least 2 characters');
+        showWarning('Search query must be at least 2 characters long.', 'Search Too Short');
         return;
     }
 
@@ -584,7 +584,7 @@ function saveManualMatch() {
     const title = document.getElementById('edit-title').value.trim();
 
     if (!author || !title) {
-        alert('Author and title are required');
+        showWarning('Author and title are required to save a match.', 'Required Fields');
         return;
     }
 
@@ -611,14 +611,14 @@ function saveManualMatch() {
             editModal.hide();
             document.getElementById(`queue-${queueId}`).remove();
             refreshQueue();
-            alert('Saved as pending fix! Go to History > Pending to apply it.');
+            showSuccess('Saved as pending fix! Go to History > Pending to apply it.', 'Saved', null, null, {url: '/history?status=pending', text: 'View Pending Fixes'});
         } else {
-            alert('Error: ' + (data.error || 'Unknown error'));
+            showErrorWithHelp(data.error || 'Unknown error', 'database');
             log('Save error: ' + data.error);
         }
     })
     .catch(e => {
-        alert('Error: ' + e);
+        showErrorWithHelp('Error: ' + e, 'api');
         log('Save error: ' + e);
     });
 }
