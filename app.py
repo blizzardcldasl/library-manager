@@ -4049,6 +4049,13 @@ def scan_folder_recursive(folder_path, library_root, config, conn, c,
                         if title_match:
                             book_title_for_match = title_match.group(1).strip()
                 
+                # Track specific mismatch types
+                author_mismatches = 0
+                title_mismatches = 0
+                no_metadata_count = 0
+                file_author_values = []
+                file_title_values = []
+                
                 for audio_file in sample_files:
                     match_result, match_issues, confidence = verify_file_matches_folder(
                         audio_file, author_context or 'Unknown', book_title_for_match
@@ -4058,12 +4065,61 @@ def scan_folder_recursive(folder_path, library_root, config, conn, c,
                     if match_result is False:  # Explicitly False (not None)
                         mismatches += 1
                         file_mismatch_issues.extend(match_issues)
+                        
+                        # Analyze specific mismatch types
+                        for issue in match_issues:
+                            if issue.startswith('file_author_mismatch:'):
+                                author_mismatches += 1
+                                # Extract author from issue string
+                                if 'file=' in issue and 'folder=' in issue:
+                                    file_author = issue.split('file=')[1].split(',folder=')[0]
+                                    if file_author not in file_author_values:
+                                        file_author_values.append(file_author)
+                            elif issue.startswith('file_title_mismatch:'):
+                                title_mismatches += 1
+                                # Extract title from issue string
+                                if 'file=' in issue and 'folder=' in issue:
+                                    file_title = issue.split('file=')[1].split(',folder=')[0]
+                                    if file_title not in file_title_values:
+                                        file_title_values.append(file_title)
+                    elif match_result is None:
+                        no_metadata_count += 1
                 
                 if mismatches > 0:
                     mismatch_rate = mismatches / total_checked
                     if mismatch_rate >= 0.5:  # 50% or more files don't match
-                        all_issues.append(f'file_folder_mismatch:{mismatch_rate:.0%}_files_dont_match')
-                        logger.warning(f"File-folder mismatch detected: {path_str} ({mismatches}/{total_checked} files)")
+                        # Build detailed mismatch description
+                        mismatch_details = []
+                        
+                        if author_mismatches > 0:
+                            mismatch_details.append(f"author_mismatch({author_mismatches}/{total_checked})")
+                            if file_author_values:
+                                mismatch_details.append(f"file_authors={','.join(file_author_values[:2])}")
+                                if len(file_author_values) > 2:
+                                    mismatch_details.append(f"+{len(file_author_values)-2}_more")
+                        
+                        if title_mismatches > 0:
+                            mismatch_details.append(f"title_mismatch({title_mismatches}/{total_checked})")
+                            if file_title_values:
+                                mismatch_details.append(f"file_titles={','.join(file_title_values[:2])}")
+                                if len(file_title_values) > 2:
+                                    mismatch_details.append(f"+{len(file_title_values)-2}_more")
+                        
+                        if no_metadata_count > 0:
+                            mismatch_details.append(f"no_metadata({no_metadata_count})")
+                        
+                        # Create detailed issue string
+                        detail_str = "|".join(mismatch_details) if mismatch_details else "unknown_mismatch"
+                        issue_str = f'file_folder_mismatch:{mismatch_rate:.0%}_files_dont_match|{detail_str}'
+                        all_issues.append(issue_str)
+                        
+                        # Log detailed information
+                        log_details = []
+                        if author_mismatches > 0:
+                            log_details.append(f"author mismatch: files show {', '.join(file_author_values[:3])} vs folder '{author_context}'")
+                        if title_mismatches > 0:
+                            log_details.append(f"title mismatch: files show {', '.join(file_title_values[:3])} vs folder '{book_title_for_match}'")
+                        logger.warning(f"File-folder mismatch detected: {path_str} ({mismatches}/{total_checked} files) - {'; '.join(log_details)}")
         
         # Check for nested disc folders
         nested_dirs = [d for d in subdirs if is_disc_chapter_folder(d.name)]

@@ -70,7 +70,12 @@
                         <span class="text-warning">{{ item.current_author }}</span>
                     </td>
                     <td class="text-truncate" style="max-width: 200px;">{{ item.current_title }}</td>
-                    <td><small class="badge bg-danger text-wrap" style="max-width: 200px;">{{ (item.reason or 'Unknown')[:50] }}{% if item.reason and item.reason|length > 50 %}...{% endif %}</small></td>
+                    <td>
+                        <small class="badge bg-danger text-wrap" style="max-width: 200px;" 
+                               title="{{ item.reason or 'Unknown' }}">
+                            <span class="issue-text">{{ item.reason or 'Unknown' }}</span>
+                        </small>
+                    </td>
                     <td><small>{{ item.added_at[5:16] if item.added_at else '?' }}</small></td>
                     <td>
                         <button class="btn btn-sm btn-outline-primary me-1" onclick="editItem({{ item.id }}, '{{ item.current_author | e }}', '{{ item.current_title | e }}')" title="Edit">
@@ -297,6 +302,92 @@ let isProcessing = false;
 let pollInterval = null;
 let autoScrollEnabled = true;
 
+// Format issue strings for better readability
+function formatIssue(issueStr) {
+    if (!issueStr) return 'Unknown';
+    
+    // Handle file_folder_mismatch with detailed info
+    if (issueStr.includes('file_folder_mismatch:')) {
+        const parts = issueStr.split('|');
+        let formatted = parts[0].replace('file_folder_mismatch:', '');
+        
+        if (parts.length > 1) {
+            const details = parts.slice(1).join('|');
+            const detailParts = details.split('|');
+            
+            let detailHtml = '<div class="mt-1" style="font-size: 0.85em;">';
+            let hasAuthorMismatch = false;
+            let hasTitleMismatch = false;
+            
+            for (const part of detailParts) {
+                if (part.startsWith('author_mismatch')) {
+                    hasAuthorMismatch = true;
+                    const match = part.match(/author_mismatch\((\d+)\/(\d+)\)/);
+                    if (match) {
+                        detailHtml += `<div class="text-warning"><i class="bi bi-exclamation-triangle"></i> Author mismatch: ${match[1]}/${match[2]} files</div>`;
+                    }
+                } else if (part.startsWith('title_mismatch')) {
+                    hasTitleMismatch = true;
+                    const match = part.match(/title_mismatch\((\d+)\/(\d+)\)/);
+                    if (match) {
+                        detailHtml += `<div class="text-warning"><i class="bi bi-exclamation-triangle"></i> Title mismatch: ${match[1]}/${match[2]} files</div>`;
+                    }
+                } else if (part.startsWith('file_authors=')) {
+                    const authors = part.replace('file_authors=', '').replace(/\+(\d+)_more/, '');
+                    detailHtml += `<div class="text-muted small ms-3">Files show: ${escapeHtml(authors)}</div>`;
+                } else if (part.startsWith('file_titles=')) {
+                    const titles = part.replace('file_titles=', '').replace(/\+(\d+)_more/, '');
+                    detailHtml += `<div class="text-muted small ms-3">Files show: ${escapeHtml(titles)}</div>`;
+                } else if (part.startsWith('no_metadata')) {
+                    const match = part.match(/no_metadata\((\d+)\)/);
+                    if (match) {
+                        detailHtml += `<div class="text-info small"><i class="bi bi-info-circle"></i> ${match[1]} file(s) have no metadata</div>`;
+                    }
+                }
+            }
+            
+            detailHtml += '</div>';
+            
+            // Add summary
+            if (hasAuthorMismatch && hasTitleMismatch) {
+                formatted = 'Files don\'t match folder (author & title)' + detailHtml;
+            } else if (hasAuthorMismatch) {
+                formatted = 'Files in wrong author folder' + detailHtml;
+            } else if (hasTitleMismatch) {
+                formatted = 'Files don\'t match folder title' + detailHtml;
+            } else {
+                formatted += detailHtml;
+            }
+            
+            return formatted;
+        }
+        
+        return formatted;
+    }
+    
+    // Handle other issue types
+    return issueStr.replace(/_/g, ' ').replace(/:/g, ': ');
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Format issues on page load
+document.addEventListener('DOMContentLoaded', function() {
+    const issueElements = document.querySelectorAll('.issue-text');
+    issueElements.forEach(el => {
+        const originalText = el.textContent;
+        const formatted = formatIssue(originalText);
+        if (formatted !== originalText) {
+            el.innerHTML = formatted;
+        }
+    });
+});
+
 function log(msg) {
     const logEl = document.getElementById('debug-log');
     const logContainer = document.getElementById('log-container');
@@ -454,10 +545,15 @@ function refreshQueue() {
                     tr.id = `queue-${item.id}`;
                     const authorEsc = escapeHtml(item.current_author);
                     const titleEsc = escapeHtml(item.current_title);
+                    const issueFormatted = formatIssue(item.reason || 'Unknown');
                     tr.innerHTML = `
                         <td><span class="text-warning">${authorEsc}</span></td>
                         <td>${titleEsc}</td>
-                        <td><span class="badge bg-danger">${escapeHtml(item.reason)}</span></td>
+                        <td>
+                            <small class="badge bg-danger text-wrap" style="max-width: 200px;" title="${escapeHtml(item.reason || 'Unknown')}">
+                                ${issueFormatted}
+                            </small>
+                        </td>
                         <td><small>${item.added_at ? item.added_at.substring(0,16) : 'Unknown'}</small></td>
                         <td>
                             <button class="btn btn-sm btn-outline-primary me-1" onclick="editItem(${item.id}, '${authorEsc.replace(/'/g, "\\'")}', '${titleEsc.replace(/'/g, "\\'")}')" title="Edit">
