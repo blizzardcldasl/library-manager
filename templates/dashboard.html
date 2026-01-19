@@ -4,14 +4,16 @@
 {% block content %}
 <div class="row mb-4">
     <div class="col-md-3">
-        <div class="card stat-card h-100" title="All audiobook folders found in your library">
-            <div class="card-body text-center">
-                <i class="bi bi-collection text-info" style="font-size: 2rem;"></i>
-                <div class="stat-number" id="total-books">{{ total_books }}</div>
-                <div class="text-muted">Total Books</div>
-                <small class="text-muted" style="font-size: 0.7rem;">in library</small>
+        <a href="/books" class="text-decoration-none">
+            <div class="card stat-card h-100" title="All audiobook folders found in your library" style="cursor: pointer;">
+                <div class="card-body text-center">
+                    <i class="bi bi-collection text-info" style="font-size: 2rem;"></i>
+                    <div class="stat-number" id="total-books">{{ total_books }}</div>
+                    <div class="text-muted">Total Books</div>
+                    <small class="text-muted" style="font-size: 0.7rem;">in library</small>
+                </div>
             </div>
-        </div>
+        </a>
     </div>
     <div class="col-md-3">
         <a href="/queue" class="text-decoration-none">

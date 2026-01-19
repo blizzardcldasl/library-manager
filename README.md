@@ -110,6 +110,16 @@ Brandon Sanderson/Mistborn/2 - The Well of Ascension/
 James S.A. Corey/The Expanse/1 - Leviathan Wakes/
 ```
 
+### Readarr Format
+Standard book format for Readarr:
+```
+Brandon Sanderson/Mistborn/Mistborn #1 - The Final Empire/The Final Empire.mp3
+Brandon Sanderson/Mistborn/Mistborn #1 - The Final Empire/The Final Empire (1).mp3  (multi-part)
+```
+Format: `Author/{Book Series}/{Book SeriesTitle} - {Book Title}/{Book Title} { (PartNumber)}.ext`
+- Structure: Author folder → Series folder → Book folder (Series Name #Number - Book Title) → Files
+- Files named: `Book Title.ext` or `Book Title (PartNumber).ext` for multi-part books
+
 ### Custom Naming Templates
 Build your own folder structure:
 ```

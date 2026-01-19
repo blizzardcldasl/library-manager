@@ -35,6 +35,8 @@ All settings are configured through the web UI at **Settings**.
 |--------|---------|
 | `author/title` | `Brandon Sanderson/Mistborn/` |
 | `author - title` | `Brandon Sanderson - Mistborn/` |
+| `readarr` | `Brandon Sanderson/Mistborn/Mistborn #1 - The Final Empire/The Final Empire.mp3` |
+| `readarr` (multi-part) | `Brandon Sanderson/Mistborn/Mistborn #1 - The Final Empire/The Final Empire (1).mp3` |
 
 ## Series Grouping
 

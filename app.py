@@ -455,7 +455,7 @@ DEFAULT_CONFIG = {
     "ebook_library_mode": "merge",  # "merge" = same folder as audiobooks, "separate" = own library
     "audio_analysis": False,  # Enable Gemini audio analysis for verification (Beta)
     "update_channel": "beta",  # "stable", "beta", or "nightly"
-    "naming_format": "author/title",  # "author/title", "author - title", "custom"
+    "naming_format": "author/title",  # "author/title", "author - title", "readarr", "custom"
     "custom_naming_template": "{author}/{title}"  # Custom template with {author}, {title}, {series}, etc.
 }
 
@@ -754,15 +754,22 @@ def sanitize_path_component(name):
 
 
 def build_new_path(lib_path, author, title, series=None, series_num=None, narrator=None, year=None,
-                   edition=None, variant=None, config=None):
+                   edition=None, variant=None, config=None, part_number=None, audio_file_count=None):
     """Build a new path based on the naming format configuration.
 
-    Audiobookshelf-compatible format (when series_grouping enabled):
-    - Narrator in curly braces: {Ray Porter}
-    - Series number prefix: "1 - Title"
-    - Year in parentheses: (2003)
-    - Edition in brackets: [30th Anniversary Edition]
-    - Variant in brackets: [Graphic Audio]
+    Supported formats:
+    - author/title: Author/Title (default)
+    - author - title: Author - Title (flat structure)
+    - readarr: Author/{Book Series}/{Book SeriesTitle} - {Book Title}/{Book Title} { (PartNumber)}.ext
+      - Structure: Author/Series Name/Series Name #Number - Book Title/Book Title (PartNumber).ext
+      - Example: Author/Mistborn/Mistborn #1 - The Final Empire/The Final Empire (1).mp3
+    - custom: Uses custom_naming_template from config
+    - series_grouping (when enabled): Author/Series/# - Title (Audiobookshelf-compatible)
+      - Narrator in curly braces: {Ray Porter}
+      - Series number prefix: "1 - Title"
+      - Year in parentheses: (2003)
+      - Edition in brackets: [30th Anniversary Edition]
+      - Variant in brackets: [Graphic Audio]
 
     SAFETY: Returns None if path would be invalid/dangerous.
     """
@@ -860,6 +867,24 @@ def build_new_path(lib_path, author, title, series=None, series_num=None, narrat
         # Flat structure: Author - Title (single folder)
         folder_name = f"{safe_author} - {title_folder}"
         result_path = lib_path / folder_name
+    elif naming_format == 'readarr':
+        # Readarr format: Author/{Book Series}/{Book SeriesTitle} - {Book Title}/{Book Title} { (PartNumber)}.ext
+        # Format structure:
+        #   - Author/ (folder)
+        #   - {Book Series}/ (folder - just series name)
+        #   - {Book SeriesTitle} - {Book Title}/ (folder - Series Name #Number - Book Title)
+        #   - {Book Title} { (PartNumber)}.ext (files inside)
+        # Example: Author/Mistborn/Mistborn #1 - The Final Empire/The Final Empire (1).mp3
+        if safe_series and series_num:
+            # Series book: Author/Series Name/Series Name #Number - Book Title/
+            # Files inside will be named: Book Title (PartNumber).ext
+            # Build book folder: "Series Name #Number - Book Title" (this is {Book SeriesTitle} - {Book Title})
+            book_folder = f"{safe_series} #{series_num} - {safe_title}"
+            
+            result_path = lib_path / safe_author / safe_series / book_folder
+        else:
+            # No series: fallback to Author/Title
+            result_path = lib_path / safe_author / title_folder
     elif series_grouping and safe_series:
         # Series grouping enabled AND book has series: Author/Series/Title
         result_path = lib_path / safe_author / safe_series / title_folder
@@ -4568,10 +4593,20 @@ def process_queue(config, limit=None):
                 lib_path = old_path.parent.parent
                 logger.warning(f"Book path {old_path} not under any configured library, guessing lib_path={lib_path}")
 
+            # Count audio files for multi-part book detection (Readarr format)
+            audio_file_count = None
+            if old_path.exists() and old_path.is_dir():
+                try:
+                    audio_files = find_audio_files(str(old_path))
+                    audio_file_count = len(audio_files) if audio_files else 0
+                except Exception as e:
+                    logger.debug(f"Could not count audio files for {old_path}: {e}")
+
             new_path = build_new_path(lib_path, new_author, new_title,
                                       series=new_series, series_num=new_series_num,
                                       narrator=new_narrator, year=new_year,
-                                      edition=new_edition, variant=new_variant, config=config)
+                                      edition=new_edition, variant=new_variant, config=config,
+                                      audio_file_count=audio_file_count)
 
             # For loose files, new_path should include the filename
             is_loose_file = row['reason'] and row['reason'].startswith('loose_file_needs_folder')
@@ -4668,7 +4703,8 @@ def process_queue(config, limit=None):
                 new_path = build_new_path(lib_path, new_author, new_title,
                                           series=new_series, series_num=new_series_num,
                                           narrator=new_narrator, year=new_year,
-                                          edition=new_edition, variant=new_variant, config=config)
+                                          edition=new_edition, variant=new_variant, config=config,
+                                          audio_file_count=audio_file_count)
 
                 # CRITICAL SAFETY: Check recalculated path
                 if new_path is None:
@@ -4713,6 +4749,7 @@ def process_queue(config, limit=None):
                                     lib_path, new_author, new_title,
                                     series=new_series, series_num=new_series_num,
                                     narrator=narrator_val or new_narrator,
+                                    audio_file_count=audio_file_count,
                                     year=new_year if dist_type == 'year' else None,
                                     edition=edition_val,
                                     variant=variant_val,
@@ -5158,6 +5195,78 @@ def orphans_page():
 def empty_folders_page():
     """Empty folders management page."""
     return render_template('empty_folders.html')
+
+@app.route('/books')
+def books_page():
+    """Books library listing page."""
+    # Get query parameters
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 50, type=int)
+    search = request.args.get('search', '').strip()
+    status_filter = request.args.get('status', '')
+    sort_by = request.args.get('sort', 'updated_at')
+    sort_order = request.args.get('order', 'desc')
+    
+    # Validate sort column
+    valid_sorts = ['current_author', 'current_title', 'status', 'created_at', 'updated_at']
+    if sort_by not in valid_sorts:
+        sort_by = 'updated_at'
+    if sort_order not in ['asc', 'desc']:
+        sort_order = 'desc'
+    
+    conn = get_db()
+    c = conn.cursor()
+    
+    # Build query
+    where_clauses = []
+    params = []
+    
+    if search:
+        where_clauses.append("(current_author LIKE ? OR current_title LIKE ? OR path LIKE ?)")
+        search_param = f'%{search}%'
+        params.extend([search_param, search_param, search_param])
+    
+    if status_filter:
+        where_clauses.append("status = ?")
+        params.append(status_filter)
+    
+    where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
+    
+    # Get total count
+    c.execute(f'SELECT COUNT(*) as count FROM books WHERE {where_sql}', params)
+    total_books = c.fetchone()['count']
+    total_pages = (total_books + per_page - 1) // per_page
+    
+    # Get books with pagination
+    offset = (page - 1) * per_page
+    order_sql = f"{sort_by} {sort_order.upper()}"
+    c.execute(f'''SELECT id, path, current_author, current_title, status, 
+                        error_message, created_at, updated_at
+                 FROM books 
+                 WHERE {where_sql}
+                 ORDER BY {order_sql}
+                 LIMIT ? OFFSET ?''', params + [per_page, offset])
+    books = c.fetchall()
+    
+    # Get status counts for filter badges
+    c.execute('''SELECT status, COUNT(*) as count 
+                 FROM books 
+                 GROUP BY status''')
+    status_counts = {row['status']: row['count'] for row in c.fetchall()}
+    
+    conn.close()
+    
+    return render_template('books.html',
+                         books=books,
+                         total_books=total_books,
+                         page=page,
+                         per_page=per_page,
+                         total_pages=total_pages,
+                         search=search,
+                         status_filter=status_filter,
+                         sort_by=sort_by,
+                         sort_order=sort_order,
+                         status_counts=status_counts)
 
 @app.route('/queue')
 def queue_page():
@@ -7049,6 +7158,159 @@ def api_abs_untouched(library_id):
         })
 
     return jsonify({'success': True, 'items': result, 'count': len(result)})
+
+@app.route('/api/book/<int:book_id>')
+def api_get_book(book_id):
+    """Get book details by ID."""
+    conn = get_db()
+    c = conn.cursor()
+    
+    c.execute('''SELECT id, path, current_author, current_title, status, 
+                        error_message, created_at, updated_at
+                 FROM books 
+                 WHERE id = ?''', (book_id,))
+    book = c.fetchone()
+    conn.close()
+    
+    if not book:
+        return jsonify({'success': False, 'error': 'Book not found'})
+    
+    return jsonify({
+        'success': True,
+        'book': dict(book)
+    })
+
+@app.route('/api/manual_fix_book', methods=['POST'])
+def api_manual_fix_book():
+    """
+    Save a manual fix for a book (not in queue).
+    Accepts custom author/title OR a selected metadata API result.
+    """
+    data = request.get_json() or {}
+    book_id = data.get('book_id')
+
+    # Manual entry fields
+    new_author = data.get('author', '').strip()
+    new_title = data.get('title', '').strip()
+
+    # Or metadata API result (BookBucket, OpenLibrary, etc.)
+    metadata_result = data.get('metadata_result')  # Full result object from search
+
+    if not book_id:
+        return jsonify({'success': False, 'error': 'book_id required'})
+
+    conn = get_db()
+    c = conn.cursor()
+
+    # Get the book
+    c.execute('SELECT * FROM books WHERE id = ?', (book_id,))
+    book = c.fetchone()
+    if not book:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Book not found'})
+
+    book = dict(book)
+    old_path = book['path']
+    old_author = book['current_author']
+    old_title = book['current_title']
+
+    # Determine new values from metadata result
+    if metadata_result:
+        new_author = metadata_result.get('author') or metadata_result.get('author_name') or new_author
+        new_title = metadata_result.get('title') or metadata_result.get('name') or new_title
+        # Include series info if available
+        series_name = metadata_result.get('series') or metadata_result.get('series_name')
+        series_pos = metadata_result.get('series_position') or metadata_result.get('series_num')
+        if series_name and series_pos:
+            new_title = f"{new_title} ({series_name} #{int(series_pos) if series_pos == int(series_pos) else series_pos})"
+
+    if not new_author or not new_title:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Author and title required'})
+
+    # Build new path
+    config = load_config()
+    library_paths = config.get('library_paths', [])
+
+    # Find which library this book is in
+    library_root = None
+    for lib_path in library_paths:
+        if old_path.startswith(lib_path):
+            library_root = lib_path
+            break
+
+    if not library_root:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Could not determine library root'})
+
+    # Build new path using the same logic as build_new_path
+    from pathlib import Path
+    library_root_path = Path(library_root)
+    
+    # Extract metadata for path building
+    series_name = None
+    series_num = None
+    narrator = None
+    year = None
+    
+    if metadata_result:
+        series_name = metadata_result.get('series') or metadata_result.get('series_name')
+        series_num = metadata_result.get('series_position') or metadata_result.get('series_num')
+        narrator = metadata_result.get('narrator')
+        year = metadata_result.get('year') or metadata_result.get('year_published')
+    
+    # Count audio files for multi-part book detection (Readarr format)
+    audio_file_count = None
+    old_path_obj = Path(old_path)
+    if old_path_obj.exists() and old_path_obj.is_dir():
+        try:
+            audio_files = find_audio_files(str(old_path_obj))
+            audio_file_count = len(audio_files) if audio_files else 0
+        except Exception as e:
+            logger.debug(f"Could not count audio files for {old_path_obj}: {e}")
+    
+    # Use build_new_path for consistent path building
+    new_path = build_new_path(
+        library_root_path,
+        new_author,
+        new_title,
+        series=series_name,
+        series_num=series_num,
+        narrator=narrator,
+        year=year,
+        config=config,
+        audio_file_count=audio_file_count
+    )
+    
+    if not new_path:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Invalid author or title - cannot build path'})
+    
+    new_path = str(new_path)
+
+    # Check if it would overwrite something
+    if os.path.exists(new_path) and new_path != old_path:
+        conn.close()
+        return jsonify({'success': False, 'error': f'Path already exists: {new_path}'})
+
+    # Record as pending fix (don't rename immediately - user can review)
+    c.execute('''
+        INSERT INTO history (book_id, old_author, old_title, new_author, new_title, old_path, new_path, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'pending_fix')
+    ''', (book_id, old_author, old_title, new_author, new_title, old_path, new_path))
+
+    # Update book status
+    c.execute('UPDATE books SET status = ? WHERE id = ?', ('pending_fix', book_id))
+
+    conn.commit()
+    conn.close()
+
+    return jsonify({
+        'success': True,
+        'message': f'Saved pending fix: {old_author}/{old_title} → {new_author}/{new_title}',
+        'old_path': old_path,
+        'new_path': new_path
+    })
 
 
 # ============== USER GROUPS (for ABS progress rules) ==============

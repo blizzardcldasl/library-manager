@@ -1,0 +1,755 @@
+{% extends "base.html" %}
+{% block title %}Books Library - Library Manager{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>
+        <i class="bi bi-collection"></i>
+        Books Library
+    </h2>
+    <div>
+        <span class="text-muted">{{ total_books }} total book{{ 's' if total_books != 1 else '' }}</span>
+    </div>
+</div>
+
+<!-- Search and Filters -->
+<div class="card mb-4">
+    <div class="card-body">
+        <form method="GET" action="/books" id="filter-form">
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label">Search</label>
+                    <div class="input-group">
+                        <input type="text" class="form-control bg-dark text-light" name="search" 
+                               value="{{ search }}" placeholder="Author, title, or path...">
+                        <button class="btn btn-outline-secondary" type="submit">
+                            <i class="bi bi-search"></i>
+                        </button>
+                        {% if search %}
+                        <a href="/books?status={{ status_filter }}&sort={{ sort_by }}&order={{ sort_order }}" 
+                           class="btn btn-outline-secondary" title="Clear search">
+                            <i class="bi bi-x"></i>
+                        </a>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Status</label>
+                    <select class="form-select bg-dark text-light" name="status" onchange="this.form.submit()">
+                        <option value="">All Statuses</option>
+                        <option value="pending" {% if status_filter == 'pending' %}selected{% endif %}>
+                            Pending ({{ status_counts.get('pending', 0) }})
+                        </option>
+                        <option value="fixed" {% if status_filter == 'fixed' %}selected{% endif %}>
+                            Fixed ({{ status_counts.get('fixed', 0) }})
+                        </option>
+                        <option value="verified" {% if status_filter == 'verified' %}selected{% endif %}>
+                            Verified ({{ status_counts.get('verified', 0) }})
+                        </option>
+                        <option value="pending_fix" {% if status_filter == 'pending_fix' %}selected{% endif %}>
+                            Pending Fix ({{ status_counts.get('pending_fix', 0) }})
+                        </option>
+                        <option value="error" {% if status_filter == 'error' %}selected{% endif %}>
+                            Error ({{ status_counts.get('error', 0) }})
+                        </option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Sort By</label>
+                    <select class="form-select bg-dark text-light" name="sort" onchange="this.form.submit()">
+                        <option value="updated_at" {% if sort_by == 'updated_at' %}selected{% endif %}>Last Updated</option>
+                        <option value="current_author" {% if sort_by == 'current_author' %}selected{% endif %}>Author</option>
+                        <option value="current_title" {% if sort_by == 'current_title' %}selected{% endif %}>Title</option>
+                        <option value="status" {% if sort_by == 'status' %}selected{% endif %}>Status</option>
+                        <option value="created_at" {% if sort_by == 'created_at' %}selected{% endif %}>Created</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Order</label>
+                    <select class="form-select bg-dark text-light" name="order" onchange="this.form.submit()">
+                        <option value="desc" {% if sort_order == 'desc' %}selected{% endif %}>Descending</option>
+                        <option value="asc" {% if sort_order == 'asc' %}selected{% endif %}>Ascending</option>
+                    </select>
+                </div>
+                <div class="col-md-1">
+                    <label class="form-label">Per Page</label>
+                    <select class="form-select bg-dark text-light" name="per_page" onchange="this.form.submit()">
+                        <option value="25" {% if per_page == 25 %}selected{% endif %}>25</option>
+                        <option value="50" {% if per_page == 50 %}selected{% endif %}>50</option>
+                        <option value="100" {% if per_page == 100 %}selected{% endif %}>100</option>
+                        <option value="200" {% if per_page == 200 %}selected{% endif %}>200</option>
+                    </select>
+                </div>
+            </div>
+            <input type="hidden" name="page" value="1">
+        </form>
+    </div>
+</div>
+
+{% if books %}
+<style>
+    .resizable-table th { resize: horizontal; overflow: auto; min-width: 60px; }
+    .resizable-table td { word-break: break-word; }
+    .book-path { font-size: 0.85rem; color: #6c757d; }
+</style>
+<div class="card">
+    <div class="card-body p-0" style="max-height: 700px; overflow: auto;">
+        <table class="table table-sm mb-0 resizable-table table-hover" style="table-layout: auto;">
+            <thead style="position: sticky; top: 0; background: rgba(22, 33, 62, 0.98); z-index: 10;">
+                <tr>
+                    <th style="width: 25%;">Author</th>
+                    <th style="width: 30%;">Title</th>
+                    <th style="width: 30%;">Path</th>
+                    <th style="width: 100px;">Status</th>
+                    <th style="width: 120px;">Updated</th>
+                    <th style="width: 80px;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for book in books %}
+                <tr>
+                    <td>
+                        <strong class="text-info">{{ book.current_author or 'Unknown' }}</strong>
+                    </td>
+                    <td>
+                        <span class="text-light">{{ book.current_title or 'Untitled' }}</span>
+                    </td>
+                    <td>
+                        <span class="book-path" title="{{ book.path }}">
+                            {% set path_parts = book.path.split('/') %}
+                            {% if path_parts|length > 3 %}
+                                .../{{ '/'.join(path_parts[-3:]) }}
+                            {% else %}
+                                {{ book.path }}
+                            {% endif %}
+                        </span>
+                    </td>
+                    <td>
+                        {% if book.status == 'fixed' %}
+                        <span class="badge bg-success">Fixed</span>
+                        {% elif book.status == 'verified' %}
+                        <span class="badge bg-info">Verified</span>
+                        {% elif book.status == 'pending_fix' %}
+                        <span class="badge bg-warning text-dark">Pending Fix</span>
+                        {% elif book.status == 'error' %}
+                        <span class="badge bg-danger" title="{{ book.error_message or 'Error' }}">
+                            Error <i class="bi bi-info-circle"></i>
+                        </span>
+                        {% else %}
+                        <span class="badge bg-secondary">Pending</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <small class="text-muted">
+                            {% if book.updated_at %}
+                                {{ book.updated_at[5:16] if book.updated_at|length > 16 else book.updated_at }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </small>
+                    </td>
+                    <td>
+                        <div class="btn-group btn-group-sm" role="group">
+                            <button class="btn btn-outline-info btn-sm" 
+                                    onclick="viewBookDetails({{ book.id }})" 
+                                    title="View details">
+                                <i class="bi bi-eye"></i>
+                            </button>
+                            <button class="btn btn-outline-primary btn-sm" 
+                                    onclick="editBook({{ book.id }}, '{{ book.current_author|replace("'", "\\'") }}', '{{ book.current_title|replace("'", "\\'") }}')" 
+                                    title="Edit/Fix metadata">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            {% if book.status == 'pending_fix' %}
+                            <a href="/history?status=pending" class="btn btn-outline-warning btn-sm" 
+                               title="View pending fix">
+                                <i class="bi bi-hourglass-split"></i>
+                            </a>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Pagination -->
+{% if total_pages > 1 %}
+{% set filter_params = [] %}
+{% if search %}{% set _ = filter_params.append('search=' + search|urlencode) %}{% endif %}
+{% if status_filter %}{% set _ = filter_params.append('status=' + status_filter) %}{% endif %}
+{% if sort_by %}{% set _ = filter_params.append('sort=' + sort_by) %}{% endif %}
+{% if sort_order %}{% set _ = filter_params.append('order=' + sort_order) %}{% endif %}
+{% if per_page %}{% set _ = filter_params.append('per_page=' + per_page|string) %}{% endif %}
+{% set filter_string = '&' + filter_params|join('&') if filter_params else '' %}
+<nav class="mt-4">
+    <ul class="pagination justify-content-center">
+        {% if page > 1 %}
+        <li class="page-item">
+            <a class="page-link" href="?page={{ page - 1 }}{{ filter_string }}">&laquo; Previous</a>
+        </li>
+        {% endif %}
+
+        {% for p in range(1, total_pages + 1) %}
+        {% if p == page %}
+        <li class="page-item active"><span class="page-link">{{ p }}</span></li>
+        {% elif p <= 3 or p >= total_pages - 2 or (p >= page - 2 and p <= page + 2) %}
+        <li class="page-item"><a class="page-link" href="?page={{ p }}{{ filter_string }}">{{ p }}</a></li>
+        {% elif p == 4 or p == total_pages - 3 %}
+        <li class="page-item disabled"><span class="page-link">...</span></li>
+        {% endif %}
+        {% endfor %}
+
+        {% if page < total_pages %}
+        <li class="page-item">
+            <a class="page-link" href="?page={{ page + 1 }}{{ filter_string }}">Next &raquo;</a>
+        </li>
+        {% endif %}
+    </ul>
+</nav>
+{% endif %}
+
+{% else %}
+<div class="card">
+    <div class="card-body text-center py-5">
+        <i class="bi bi-journal-x text-muted" style="font-size: 4rem;"></i>
+        <h4 class="mt-3">No books found</h4>
+        <p class="text-muted">
+            {% if search or status_filter %}
+            Try adjusting your search or filter criteria.
+            {% else %}
+            Run a library scan to discover books.
+            {% endif %}
+        </p>
+        {% if search or status_filter %}
+        <a href="/books" class="btn btn-primary">Clear Filters</a>
+        {% else %}
+        <a href="/" class="btn btn-primary">Go to Dashboard</a>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Book Details Modal -->
+<div class="modal fade" id="bookDetailsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content bg-dark">
+            <div class="modal-header">
+                <h5 class="modal-title">Book Details</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="book-details-content">
+                <div class="text-center">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Book Modal -->
+<div class="modal fade" id="editBookModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content bg-dark">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-pencil"></i> Edit Book Metadata</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="edit-book-id">
+
+                <!-- Manual Entry -->
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Author</label>
+                        <input type="text" class="form-control bg-dark text-light" id="edit-book-author" placeholder="Author Name">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Title</label>
+                        <input type="text" class="form-control bg-dark text-light" id="edit-book-title" placeholder="Book Title">
+                    </div>
+                </div>
+
+                <hr class="text-muted">
+
+                <!-- Audnexus ASIN Search -->
+                <div class="mb-3">
+                    <label class="form-label"><i class="bi bi-upc"></i> Audnexus ASIN Lookup</label>
+                    <div class="input-group mb-2">
+                        <input type="text" class="form-control bg-dark text-light" id="edit-audnexus-asin" placeholder="Enter ASIN (e.g., B002V5H8FK)" maxlength="10" style="text-transform: uppercase;">
+                        <select class="form-select bg-dark text-light" id="edit-audnexus-region" style="max-width: 100px;">
+                            <option value="us">US</option>
+                            <option value="uk">UK</option>
+                            <option value="au">AU</option>
+                            <option value="ca">CA</option>
+                            <option value="de">DE</option>
+                            <option value="es">ES</option>
+                            <option value="fr">FR</option>
+                            <option value="in">IN</option>
+                            <option value="it">IT</option>
+                            <option value="jp">JP</option>
+                        </select>
+                        <button class="btn btn-outline-primary" type="button" onclick="searchAudnexusASINForBook()" id="edit-search-audnexus-btn">
+                            <i class="bi bi-search"></i> Lookup ASIN
+                        </button>
+                    </div>
+                    <small class="text-muted">Enter Audible ASIN (10 characters) to fetch metadata from Audnexus</small>
+                </div>
+
+                <!-- Audnexus Result -->
+                <div id="edit-audnexus-result" class="mb-3" style="display: none;">
+                    <div id="edit-audnexus-result-content"></div>
+                </div>
+
+                <hr class="text-muted">
+
+                <!-- Search All APIs -->
+                <div class="mb-3">
+                    <label class="form-label"><i class="bi bi-search"></i> Search All Metadata Sources</label>
+                    <div class="input-group mb-2">
+                        <input type="text" class="form-control bg-dark text-light" id="edit-search-query" placeholder="Search by title or author...">
+                        <button class="btn btn-primary" type="button" onclick="searchAllAPIsForBook()" id="edit-search-all-apis-btn">
+                            <i class="bi bi-search"></i> Search All APIs
+                        </button>
+                        <button class="btn btn-outline-info" type="button" onclick="searchBookDBForBook()" id="edit-search-bookbucket-btn" title="Search only BookBucket">
+                            <i class="bi bi-database"></i> BookBucket Only
+                        </button>
+                    </div>
+                    <small class="text-muted">Searches: OpenLibrary, Google Books, Hardcover, and BookBucket</small>
+                </div>
+
+                <!-- Search Status -->
+                <div id="edit-search-status" class="mb-2 d-none">
+                    <div class="d-flex align-items-center">
+                        <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
+                        <small class="text-muted" id="edit-search-status-text">Searching APIs...</small>
+                    </div>
+                </div>
+
+                <!-- Search Results -->
+                <div id="edit-search-results" class="mb-3" style="max-height: 400px; overflow-y: auto; display: none;">
+                    <div id="edit-search-results-list">
+                        <!-- Results inserted here - grouped by source -->
+                    </div>
+                </div>
+
+                <!-- Selected Match -->
+                <div id="edit-selected-match" class="alert alert-success d-none">
+                    <strong>Selected:</strong> <span id="edit-selected-match-text"></span>
+                    <button type="button" class="btn-close float-end" onclick="clearBookSelection()"></button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="saveBookFix()">
+                    <i class="bi bi-check-lg"></i> Save as Pending Fix
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function viewBookDetails(bookId) {
+    const modal = new bootstrap.Modal(document.getElementById('bookDetailsModal'));
+    const content = document.getElementById('book-details-content');
+    
+    content.innerHTML = '<div class="text-center"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div></div>';
+    modal.show();
+    
+    fetch(`/api/book/${bookId}`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                const book = data.book;
+                let html = `
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <strong>Author:</strong><br>
+                            <span class="text-info">${escapeHtml(book.current_author || 'Unknown')}</span>
+                        </div>
+                        <div class="col-md-6">
+                            <strong>Title:</strong><br>
+                            <span class="text-light">${escapeHtml(book.current_title || 'Untitled')}</span>
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-12">
+                            <strong>Path:</strong><br>
+                            <code class="text-muted small">${escapeHtml(book.path || 'N/A')}</code>
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <strong>Status:</strong><br>
+                            ${getStatusBadge(book.status)}
+                        </div>
+                        <div class="col-md-6">
+                            <strong>Created:</strong><br>
+                            <small class="text-muted">${book.created_at || 'N/A'}</small>
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <strong>Last Updated:</strong><br>
+                            <small class="text-muted">${book.updated_at || 'N/A'}</small>
+                        </div>
+                    </div>
+                `;
+                
+                if (book.error_message) {
+                    html += `
+                        <div class="alert alert-danger">
+                            <strong>Error:</strong><br>
+                            <small>${escapeHtml(book.error_message)}</small>
+                        </div>
+                    `;
+                }
+                
+                content.innerHTML = html;
+            } else {
+                content.innerHTML = `<div class="alert alert-danger">${escapeHtml(data.error || 'Failed to load book details')}</div>`;
+            }
+        })
+        .catch(e => {
+            content.innerHTML = `<div class="alert alert-danger">Error loading details: ${escapeHtml(e.message)}</div>`;
+        });
+}
+
+function getStatusBadge(status) {
+    const badges = {
+        'fixed': '<span class="badge bg-success">Fixed</span>',
+        'verified': '<span class="badge bg-info">Verified</span>',
+        'pending_fix': '<span class="badge bg-warning text-dark">Pending Fix</span>',
+        'error': '<span class="badge bg-danger">Error</span>',
+        'pending': '<span class="badge bg-secondary">Pending</span>'
+    };
+    return badges[status] || '<span class="badge bg-secondary">' + escapeHtml(status) + '</span>';
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Auto-submit search on Enter
+document.addEventListener('DOMContentLoaded', function() {
+    const searchInput = document.querySelector('input[name="search"]');
+    if (searchInput) {
+        searchInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                document.getElementById('filter-form').submit();
+            }
+        });
+    }
+});
+
+// ===== BOOK EDIT/FIX FUNCTIONALITY =====
+let selectedBookMetadata = null;
+let editBookModal = null;
+
+function editBook(bookId, currentAuthor, currentTitle) {
+    document.getElementById('edit-book-id').value = bookId;
+    document.getElementById('edit-book-author').value = currentAuthor || '';
+    document.getElementById('edit-book-title').value = currentTitle || '';
+    document.getElementById('edit-search-query').value = currentTitle || '';  // Pre-fill search with title
+    document.getElementById('edit-search-results').style.display = 'none';
+    document.getElementById('edit-selected-match').classList.add('d-none');
+    document.getElementById('edit-audnexus-result').style.display = 'none';
+    selectedBookMetadata = null;
+
+    if (!editBookModal) {
+        editBookModal = new bootstrap.Modal(document.getElementById('editBookModal'));
+    }
+    editBookModal.show();
+}
+
+function searchAllAPIsForBook() {
+    const query = document.getElementById('edit-search-query').value.trim();
+    const author = document.getElementById('edit-book-author').value.trim();
+    
+    if (!query || query.length < 2) {
+        showWarning('Please enter at least 2 characters to search.', 'Search Too Short');
+        return;
+    }
+
+    const statusDiv = document.getElementById('edit-search-status');
+    const statusText = document.getElementById('edit-search-status-text');
+    const resultsDiv = document.getElementById('edit-search-results');
+    const resultsList = document.getElementById('edit-search-results-list');
+    const btn = document.getElementById('edit-search-all-apis-btn');
+
+    statusDiv.classList.remove('d-none');
+    statusText.textContent = 'Searching all metadata sources...';
+    resultsDiv.style.display = 'none';
+    resultsList.innerHTML = '';
+    btn.disabled = true;
+
+    let url = `/api/search_all_apis?q=${encodeURIComponent(query)}`;
+    if (author) {
+        url += `&author=${encodeURIComponent(author)}`;
+    }
+
+    fetch(url)
+        .then(r => r.json())
+        .then(data => {
+            statusDiv.classList.add('d-none');
+            btn.disabled = false;
+
+            if (data.error) {
+                showErrorWithHelp(data.error, 'api');
+                return;
+            }
+
+            const resultsBySource = data.results_by_source || {};
+            const totalCount = data.total_count || 0;
+
+            if (totalCount === 0) {
+                resultsList.innerHTML = '<div class="alert alert-info">No results found. Try a different search term.</div>';
+                resultsDiv.style.display = 'block';
+                return;
+            }
+
+            let html = `<div class="mb-2"><small class="text-muted">Found ${totalCount} result(s) from ${Object.keys(resultsBySource).length} source(s)</small></div>`;
+
+            for (const [source, results] of Object.entries(resultsBySource)) {
+                html += `<div class="mb-3"><h6 class="text-info">${source}</h6>`;
+                results.forEach((result, idx) => {
+                    const seriesText = result.series && result.series_position 
+                        ? ` <small class="text-warning">(${result.series} #${result.series_position})</small>` 
+                        : '';
+                    html += `
+                        <div class="card bg-secondary bg-opacity-25 mb-2" style="cursor: pointer;" 
+                             onclick="selectBookMetadata(${JSON.stringify(result).replace(/"/g, '&quot;')})">
+                            <div class="card-body p-2">
+                                <strong>${escapeHtml(result.title || result.name || 'Unknown')}</strong><br>
+                                <small class="text-info">${escapeHtml(result.author || result.author_name || 'Unknown')}</small>${seriesText}
+                                ${result.year ? `<br><small class="text-muted">${result.year}</small>` : ''}
+                            </div>
+                        </div>
+                    `;
+                });
+                html += '</div>';
+            }
+
+            resultsList.innerHTML = html;
+            resultsDiv.style.display = 'block';
+        })
+        .catch(e => {
+            statusDiv.classList.add('d-none');
+            btn.disabled = false;
+            showErrorWithHelp('Search error: ' + e, 'api');
+        });
+}
+
+function searchBookDBForBook() {
+    const query = document.getElementById('edit-search-query').value.trim();
+    const author = document.getElementById('edit-book-author').value.trim();
+    
+    if (!query || query.length < 2) {
+        showWarning('Please enter at least 2 characters to search.', 'Search Too Short');
+        return;
+    }
+
+    const statusDiv = document.getElementById('edit-search-status');
+    const statusText = document.getElementById('edit-search-status-text');
+    const resultsDiv = document.getElementById('edit-search-results');
+    const resultsList = document.getElementById('edit-search-results-list');
+    const btn = document.getElementById('edit-search-bookbucket-btn');
+
+    statusDiv.classList.remove('d-none');
+    statusText.textContent = 'Searching BookBucket...';
+    resultsDiv.style.display = 'none';
+    resultsList.innerHTML = '';
+    btn.disabled = true;
+
+    let url = `/api/search_bookdb?q=${encodeURIComponent(query)}&limit=20`;
+    if (author) {
+        url += `&author=${encodeURIComponent(author)}`;
+    }
+
+    fetch(url)
+        .then(r => r.json())
+        .then(data => {
+            statusDiv.classList.add('d-none');
+            btn.disabled = false;
+
+            if (data.error || !data.results || data.results.length === 0) {
+                resultsList.innerHTML = '<div class="alert alert-info">No results found in BookBucket.</div>';
+                resultsDiv.style.display = 'block';
+                return;
+            }
+
+            let html = `<div class="mb-2"><small class="text-muted">Found ${data.results.length} result(s) from BookBucket</small></div>`;
+            html += '<div class="mb-3"><h6 class="text-info">BookBucket</h6>';
+
+            data.results.forEach(result => {
+                const seriesText = result.series_name && result.series_position 
+                    ? ` <small class="text-warning">(${result.series_name} #${result.series_position})</small>` 
+                    : '';
+                html += `
+                    <div class="card bg-secondary bg-opacity-25 mb-2" style="cursor: pointer;" 
+                         onclick="selectBookMetadata(${JSON.stringify(result).replace(/"/g, '&quot;')})">
+                        <div class="card-body p-2">
+                            <strong>${escapeHtml(result.name || result.title || 'Unknown')}</strong><br>
+                            <small class="text-info">${escapeHtml(result.author_name || 'Unknown')}</small>${seriesText}
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += '</div>';
+            resultsList.innerHTML = html;
+            resultsDiv.style.display = 'block';
+        })
+        .catch(e => {
+            statusDiv.classList.add('d-none');
+            btn.disabled = false;
+            showErrorWithHelp('Search error: ' + e, 'api');
+        });
+}
+
+function searchAudnexusASINForBook() {
+    const asin = document.getElementById('edit-audnexus-asin').value.trim().toUpperCase();
+    const region = document.getElementById('edit-audnexus-region').value;
+    const btn = document.getElementById('edit-search-audnexus-btn');
+    const resultDiv = document.getElementById('edit-audnexus-result');
+    const resultContent = document.getElementById('edit-audnexus-result-content');
+
+    if (!asin || asin.length !== 10) {
+        showWarning('ASIN must be exactly 10 characters.', 'Invalid ASIN');
+        return;
+    }
+
+    btn.disabled = true;
+    resultContent.innerHTML = '<div class="text-center"><div class="spinner-border spinner-border-sm text-primary"></div> Searching...</div>';
+    resultDiv.style.display = 'block';
+
+    fetch(`/api/search_audnexus_asin?asin=${asin}&region=${region}`)
+        .then(r => r.json())
+        .then(data => {
+            btn.disabled = false;
+            if (data.success && data.result) {
+                const result = data.result;
+                resultContent.innerHTML = `
+                    <div class="card bg-success bg-opacity-25">
+                        <div class="card-body">
+                            <h6>${escapeHtml(result.title || 'Unknown')}</h6>
+                            <p class="mb-1"><strong>Author:</strong> ${escapeHtml(result.author || 'Unknown')}</p>
+                            ${result.narrator ? `<p class="mb-1"><strong>Narrator:</strong> ${escapeHtml(result.narrator)}</p>` : ''}
+                            ${result.year ? `<p class="mb-1"><strong>Year:</strong> ${result.year}</p>` : ''}
+                            <button class="btn btn-sm btn-success mt-2" onclick="selectBookMetadata(${JSON.stringify(result).replace(/"/g, '&quot;')})">
+                                <i class="bi bi-check"></i> Use This
+                            </button>
+                        </div>
+                    </div>
+                `;
+            } else {
+                resultContent.innerHTML = `<div class="alert alert-warning">${escapeHtml(data.error || 'No result found')}</div>`;
+            }
+        })
+        .catch(e => {
+            btn.disabled = false;
+            resultContent.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(e.message)}</div>`;
+        });
+}
+
+function selectBookMetadata(result) {
+    selectedBookMetadata = result;
+    
+    // Update form fields
+    if (result.author || result.author_name) {
+        document.getElementById('edit-book-author').value = result.author || result.author_name;
+    }
+    if (result.title || result.name) {
+        let title = result.title || result.name;
+        if (result.series || result.series_name) {
+            const pos = result.series_position || result.series_num;
+            if (pos) {
+                title = `${title} (${result.series || result.series_name} #${pos})`;
+            }
+        }
+        document.getElementById('edit-book-title').value = title;
+    }
+
+    // Show selected match
+    const selectedDiv = document.getElementById('edit-selected-match');
+    const selectedText = document.getElementById('edit-selected-match-text');
+    selectedText.textContent = `${result.author || result.author_name || 'Unknown'} - ${result.title || result.name || 'Unknown'}`;
+    selectedDiv.classList.remove('d-none');
+
+    // Scroll to selected match
+    selectedDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function clearBookSelection() {
+    selectedBookMetadata = null;
+    document.getElementById('edit-selected-match').classList.add('d-none');
+}
+
+function saveBookFix() {
+    const bookId = document.getElementById('edit-book-id').value;
+    const author = document.getElementById('edit-book-author').value.trim();
+    const title = document.getElementById('edit-book-title').value.trim();
+
+    if (!author || !title) {
+        showWarning('Author and title are required to save a fix.', 'Required Fields');
+        return;
+    }
+
+    const payload = {
+        book_id: parseInt(bookId),
+        author: author,
+        title: title
+    };
+
+    // Include metadata result if one was selected
+    if (selectedBookMetadata) {
+        payload.metadata_result = selectedBookMetadata;
+    }
+
+    const btn = document.querySelector('#editBookModal .btn-primary');
+    const originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Saving...';
+
+    fetch('/api/manual_fix_book', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+    })
+        .then(r => r.json())
+        .then(data => {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+            
+            if (data.success) {
+                showSuccess('Saved as pending fix! Go to History > Pending to apply it.', 'Saved', null, null, {
+                    url: '/history?status=pending',
+                    text: 'View Pending Fixes'
+                });
+                if (editBookModal) {
+                    editBookModal.hide();
+                }
+                setTimeout(() => location.reload(), 1500);
+            } else {
+                showErrorWithHelp(data.error || 'Unknown error', 'database');
+            }
+        })
+        .catch(e => {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+            showErrorWithHelp('Error: ' + e, 'api');
+        });
+}
+</script>
+{% endblock %}
