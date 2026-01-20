@@ -29,6 +29,13 @@ This fork includes enhancements and modifications. See [FORK_NOTES.md](FORK_NOTE
 
 ## Recent Changes (stable)
 
+> **beta.28** - File-Folder Mismatch Handling & Progress Tracking
+> - **File-folder mismatch detection** - Automatically detects when files are in wrong folders
+> - **Smart file moving** - Moves files to correct existing folders instead of renaming
+> - **Real-time progress tracking** - Progress bars show scan status with current path and item counts
+> - **Empty folder detection** - Improved detection filters out metadata-only folders
+> - **Automatic cleanup** - Removes empty source folders after moving files
+
 > **beta.27** - Custom template cleanup fix (Issue #16)
 > - Fixed "dangling dash" in naming templates when series is empty
 
@@ -128,6 +135,19 @@ Build your own folder structure:
 {author} - {title} ({narrator})           → Brandon Sanderson - The Final Empire (Kramer)/
 ```
 
+### File-Folder Mismatch Handling
+- **Automatic detection** - Compares file metadata to folder structure
+- **Smart file moving** - When files are in wrong folder but correct destination exists, moves files instead of renaming
+- **Preserves structure** - Maintains nested folder structure when moving files
+- **Conflict handling** - Gracefully skips files that already exist at destination
+- **Empty folder cleanup** - Automatically removes empty source folders after moving files
+
+### Progress Tracking
+- **Real-time scan progress** - Progress bars show current library path being scanned
+- **Item counts** - Displays scanned items vs total items
+- **Status messages** - Shows current operation status (e.g., "Finding audio files...", "Analyzing folder structure...")
+- **Visual feedback** - Animated progress bars with percentage and status updates
+
 ### Additional Features
 - **Web dashboard** with dark theme
 - **Manual book matching** - search 50M+ database directly
@@ -138,6 +158,7 @@ Build your own folder structure:
 - **In-browser updates** - update from the web UI
 - **Backup & restore** - protect your configuration
 - **Version-aware renaming** - different narrators get separate folders
+- **Empty folder management** - Detect and manage folders with no audio files
 
 ---
 
@@ -256,14 +277,18 @@ See [docs/DOCKER.md](docs/DOCKER.md) for detailed setup guides.
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/scan` | POST | Trigger library scan |
+| `/api/scan_progress` | GET | Get current scan progress |
 | `/api/deep_rescan` | POST | Re-verify all books |
 | `/api/process` | POST | Process queue items |
 | `/api/queue` | GET | Get queue |
 | `/api/stats` | GET | Dashboard stats |
 | `/api/apply_fix/{id}` | POST | Apply pending fix |
+| `/api/apply_fix_direct` | POST | Apply fix immediately from edit modal |
 | `/api/reject_fix/{id}` | POST | Reject suggestion |
 | `/api/undo/{id}` | POST | Revert applied fix |
 | `/api/analyze_path` | POST | Test path analysis |
+| `/api/empty_folders` | GET | List empty book folders |
+| `/api/empty_folders/delete/{id}` | POST | Delete empty folder |
 
 ---
 
@@ -278,8 +303,14 @@ See [docs/DOCKER.md](docs/DOCKER.md) for detailed setup guides.
 **Series not detected?**
 → Enable Series Grouping in Settings → General
 
+**Files in wrong folder?**
+→ System automatically detects and moves files to correct folders when processing queue
+
 **Docker can't see files?**
 → Check volume mounts in docker-compose.yml
+
+**Scan taking too long?**
+→ Check progress bar on dashboard - shows current path and item counts
 
 ---
 
