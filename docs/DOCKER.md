@@ -219,7 +219,7 @@ version: "3.8"
 
 services:
   library-manager:
-    build: https://github.com/deucebucket/library-manager.git
+    build: https://github.com/blizzardcldasl/library-manager.git
     container_name: library-manager
     restart: unless-stopped
     ports:
@@ -244,7 +244,7 @@ services:
 1. Go to **Stacks** → **Add Stack**
 2. Name: `library-manager`
 3. Select **Repository** and enter:
-   - Repository URL: `https://github.com/deucebucket/library-manager`
+   - Repository URL: `https://github.com/blizzardcldasl/library-manager`
    - Compose path: `docker-compose.yml`
 4. Under **Environment variables**, you can override settings
 5. Click **Deploy the stack**

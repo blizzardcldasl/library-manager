@@ -718,6 +718,90 @@
             };
         }
     </script>
+    
+    <!-- Initialize Bootstrap tooltips and keyboard shortcuts -->
+    <script>
+        // Global keyboard shortcuts
+        document.addEventListener('keydown', function(e) {
+            // Ctrl/Cmd + K: Quick search (focus search input)
+            if ((e.ctrlKey || e.metaKey) && e.key === 'k' && !e.shiftKey) {
+                e.preventDefault();
+                const searchInput = document.getElementById('live-search-input') || 
+                                   document.getElementById('history-live-search') ||
+                                   document.getElementById('queue-live-search') ||
+                                   document.querySelector('input[name="search"]');
+                if (searchInput) {
+                    searchInput.focus();
+                    searchInput.select();
+                }
+            }
+            
+            // Ctrl/Cmd + S: Save (when in edit modal)
+            if ((e.ctrlKey || e.metaKey) && e.key === 's' && !e.shiftKey) {
+                const activeModal = document.querySelector('.modal.show');
+                if (activeModal) {
+                    e.preventDefault();
+                    // Check which modal is open
+                    if (activeModal.id === 'editModal') {
+                        if (typeof saveAsPending === 'function') {
+                            saveAsPending();
+                        } else if (typeof saveManualMatch === 'function') {
+                            saveManualMatch();
+                        }
+                    } else if (activeModal.id === 'editBookModal') {
+                        if (typeof saveBookFixAsPending === 'function') {
+                            saveBookFixAsPending();
+                        } else if (typeof saveBookFix === 'function') {
+                            saveBookFix();
+                        }
+                    }
+                }
+            }
+            
+            // Escape: Close modals
+            if (e.key === 'Escape') {
+                const activeModal = document.querySelector('.modal.show');
+                if (activeModal) {
+                    const modalInstance = bootstrap.Modal.getInstance(activeModal);
+                    if (modalInstance) {
+                        modalInstance.hide();
+                    }
+                }
+            }
+            
+            // Arrow keys: Navigate table rows (when focused on table)
+            const activeElement = document.activeElement;
+            if (activeElement && (activeElement.tagName === 'TD' || activeElement.closest('tbody'))) {
+                const tbody = activeElement.closest('tbody');
+                if (tbody) {
+                    const rows = Array.from(tbody.querySelectorAll('tr:not([style*="display: none"])'));
+                    const currentRow = activeElement.closest('tr');
+                    if (currentRow) {
+                        const currentIndex = rows.indexOf(currentRow);
+                        if (e.key === 'ArrowDown' && currentIndex < rows.length - 1) {
+                            e.preventDefault();
+                            const nextRow = rows[currentIndex + 1];
+                            const firstInput = nextRow.querySelector('input, button, a');
+                            if (firstInput) firstInput.focus();
+                        } else if (e.key === 'ArrowUp' && currentIndex > 0) {
+                            e.preventDefault();
+                            const prevRow = rows[currentIndex - 1];
+                            const firstInput = prevRow.querySelector('input, button, a');
+                            if (firstInput) firstInput.focus();
+                        }
+                    }
+                }
+            }
+        });
+        
+        // Initialize Bootstrap tooltips on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+            tooltipTriggerList.map(function (tooltipTriggerEl) {
+                return new bootstrap.Tooltip(tooltipTriggerEl);
+            });
+        });
+    </script>
     {% block scripts %}{% endblock %}
 </body>
 </html>

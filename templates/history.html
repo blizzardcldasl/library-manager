@@ -33,6 +33,44 @@
 </div>
 
 {% if history_items %}
+<!-- Real-time Search and Smart Selection -->
+<div class="card mb-3">
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-md-4">
+                <label class="form-label">Live Search</label>
+                <input type="text" class="form-control bg-dark text-light" id="history-live-search" 
+                       placeholder="Type to filter history items..." onkeyup="liveFilterHistory(this.value)">
+                <small class="text-muted"><span id="history-filter-count">{{ history_items|length }}</span> shown</small>
+            </div>
+            {% if status_filter == 'pending' or status_filter == 'error' %}
+            <div class="col-md-4">
+                <label class="form-label">Quick Select</label>
+                <select class="form-select bg-dark text-light" id="quick-select" onchange="applyQuickSelect()">
+                    <option value="">-- Select All Matching --</option>
+                    <option value="same_author">Same Author</option>
+                    <option value="same_series">Same Series</option>
+                    <option value="safe_fixes">Safe Fixes Only</option>
+                    <option value="drastic_changes">Drastic Changes</option>
+                    <option value="today">Added Today</option>
+                    <option value="this_week">Added This Week</option>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Select by Pattern</label>
+                <div class="input-group">
+                    <input type="text" class="form-control bg-dark text-light" id="pattern-select" 
+                           placeholder="e.g., 'Boyett' → 'Steven Boyett'">
+                    <button class="btn btn-outline-primary" type="button" onclick="selectByPattern()">
+                        <i class="bi bi-funnel"></i> Select
+                    </button>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
 <style>
     .resizable-table th { resize: horizontal; overflow: auto; min-width: 60px; }
     .resizable-table td { word-break: break-word; }
@@ -64,6 +102,41 @@
                     </td>
                     {% endif %}
                     <td><small>{{ h.fixed_at[5:16] }}</small></td>
+                    {% if status_filter == 'pending' %}
+                    <td colspan="4">
+                        <!-- Comparison View for Pending Fixes -->
+                        <div class="row g-2">
+                            <div class="col-md-6">
+                                <div class="card border-danger">
+                                    <div class="card-header bg-danger text-white">
+                                        <strong>Current</strong>
+                                    </div>
+                                    <div class="card-body">
+                                        <code class="text-danger small" style="word-break: break-all;">{{ h.old_path }}</code>
+                                        <div class="mt-2">
+                                            <strong>Author:</strong> <span class="text-danger">{{ h.old_author }}</span><br>
+                                            <strong>Title:</strong> <span class="text-muted">{{ h.old_title }}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card border-success">
+                                    <div class="card-header bg-success text-white">
+                                        <strong>Proposed</strong>
+                                    </div>
+                                    <div class="card-body">
+                                        <code class="text-success small" style="word-break: break-all;">{{ h.new_path }}</code>
+                                        <div class="mt-2">
+                                            <strong>Author:</strong> <span class="text-success">{{ h.new_author }}</span><br>
+                                            <strong>Title:</strong> <span class="text-info">{{ h.new_title }}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </td>
+                    {% else %}
                     <td title="{{ h.old_path }}">
                         <strong class="text-danger">{{ h.old_author }}</strong><br>
                         <small class="text-muted">{{ h.old_title }}</small>
@@ -75,50 +148,82 @@
                         <strong class="text-success">{{ h.new_author }}</strong><br>
                         <small class="text-info">{{ rel_path }}</small>
                     </td>
+                    {% endif %}
                     <td>
                         {% if h.is_drastic %}
-                        <span class="badge bg-danger" title="Author changed completely - review carefully!">
+                        <span class="badge bg-danger" 
+                              data-bs-toggle="tooltip" 
+                              data-bs-html="true"
+                              title="<strong>Drastic Change:</strong> Author changed completely. Review carefully before applying!">
                             <i class="bi bi-exclamation-triangle"></i> Review
                         </span>
                         {% elif h.status == 'fixed' %}
-                        <span class="badge bg-success">Applied</span>
+                        <span class="badge bg-success" 
+                              data-bs-toggle="tooltip" 
+                              title="Fix has been applied successfully">
+                            Applied
+                        </span>
                         {% elif h.status == 'pending_fix' %}
-                        <span class="badge bg-warning text-dark">Pending</span>
+                        <span class="badge bg-warning text-dark" 
+                              data-bs-toggle="tooltip" 
+                              title="Fix is pending approval. Click Apply to rename the folder.">
+                            Pending
+                        </span>
                         {% elif h.status == 'undone' %}
-                        <span class="badge bg-info">Undone</span>
+                        <span class="badge bg-info" 
+                              data-bs-toggle="tooltip" 
+                              title="This fix was undone. Folder has been renamed back to original.">
+                            Undone
+                        </span>
                         {% elif h.status == 'error' %}
-                        <span class="badge bg-danger" title="{{ h.error_message or 'Unknown error' }}" style="cursor: help;">
+                        <span class="badge bg-danger" 
+                              data-bs-toggle="tooltip" 
+                              data-bs-html="true"
+                              title="<strong>Error:</strong> {{ (h.error_message or 'Unknown error') | e }}<br><br>Click Retry to attempt applying again, or Dismiss to remove this entry."
+                              style="cursor: help;">
                             Error <i class="bi bi-info-circle"></i>
                         </span>
                         {% if h.error_message %}
                         <br><small class="text-danger">{{ h.error_message[:50] }}{% if h.error_message|length > 50 %}...{% endif %}</small>
                         {% endif %}
                         {% else %}
-                        <span class="badge bg-secondary">{{ h.status }}</span>
+                        <span class="badge bg-secondary" 
+                              data-bs-toggle="tooltip" 
+                              title="Status: {{ h.status }}">
+                            {{ h.status }}
+                        </span>
                         {% endif %}
                     </td>
                     <td>
-                        {% if h.status == 'pending_fix' %}
-                        <button class="btn btn-sm btn-success" onclick="applyFix({{ h.id }})" title="Apply fix">
-                            <i class="bi bi-check"></i>
-                        </button>
-                        <button class="btn btn-sm btn-danger" onclick="rejectFix({{ h.id }})" title="Reject - wrong fix">
-                            <i class="bi bi-x"></i>
-                        </button>
-                        {% elif h.status == 'error' %}
-                        <button class="btn btn-sm btn-success" onclick="retryFix({{ h.id }})" title="Retry - try applying this fix again">
-                            <i class="bi bi-arrow-clockwise"></i>
-                        </button>
-                        <button class="btn btn-sm btn-outline-danger" onclick="dismissError({{ h.id }})" title="Dismiss - remove this entry">
-                            <i class="bi bi-trash"></i>
-                        </button>
-                        {% elif h.status == 'fixed' and h.old_path != h.new_path %}
-                        <button class="btn btn-sm btn-outline-warning" onclick="undoFix({{ h.id }})" title="Undo - revert to original">
-                            <i class="bi bi-arrow-counterclockwise"></i>
-                        </button>
-                        {% else %}
-                        <span class="text-muted">-</span>
-                        {% endif %}
+                        <div class="btn-group btn-group-sm" role="group">
+                            {% if status_filter == 'pending' or h.status == 'pending_fix' %}
+                            <button class="btn btn-sm btn-success" onclick="quickApply({{ h.id }})" title="Quick Apply" data-bs-toggle="tooltip">
+                                <i class="bi bi-lightning-fill"></i>
+                            </button>
+                            <button class="btn btn-sm btn-success" onclick="applyFix({{ h.id }})" title="Apply fix" data-bs-toggle="tooltip">
+                                <i class="bi bi-check"></i>
+                            </button>
+                            <button class="btn btn-sm btn-danger" onclick="rejectFix({{ h.id }})" title="Reject - wrong fix" data-bs-toggle="tooltip">
+                                <i class="bi bi-x"></i>
+                            </button>
+                            {% elif h.status == 'error' %}
+                            <button class="btn btn-sm btn-warning" onclick="quickRetry({{ h.id }})" title="Quick Retry" data-bs-toggle="tooltip">
+                                <i class="bi bi-lightning-fill"></i>
+                            </button>
+                            <button class="btn btn-sm btn-success" onclick="retryFix({{ h.id }})" title="Retry - try applying this fix again" data-bs-toggle="tooltip">
+                                <i class="bi bi-arrow-clockwise"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="dismissError({{ h.id }})" title="Dismiss - remove this entry" data-bs-toggle="tooltip">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                            {% elif h.status == 'fixed' and h.old_path != h.new_path %}
+                            <button class="btn btn-sm btn-outline-warning" onclick="undoFix({{ h.id }})" title="Undo - revert to original" data-bs-toggle="tooltip">
+                                <i class="bi bi-arrow-counterclockwise"></i>
+                            </button>
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
+                        </div>
                     </td>
                 </tr>
                 {% endfor %}
@@ -171,51 +276,256 @@
 
 {% block scripts %}
 <script>
+// Quick actions
+function quickApply(historyId) {
+    // Get preview first
+    const row = Array.from(document.querySelectorAll('tbody tr')).find(r => r.innerHTML.includes(`applyFix(${historyId})`));
+    if (!row) {
+        applyFix(historyId);
+        return;
+    }
+    
+    // Extract old and new paths from row
+    const oldPath = row.querySelector('.text-danger')?.textContent || 'Unknown';
+    const newPath = row.querySelector('.text-success')?.textContent || 'Unknown';
+    
+    if (confirm(`Quick Apply fix?\n\n${oldPath}\n→\n${newPath}`)) {
+        applyFix(historyId);
+    }
+}
+
+function quickRetry(historyId) {
+    if (confirm('Quick retry this fix?')) {
+        retryFix(historyId);
+    }
+}
+
+// Initialize tooltips on page load
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize all Bootstrap tooltips
+    const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+});
+
+// Real-time filtering for history
+function liveFilterHistory(query) {
+    const rows = document.querySelectorAll('tbody tr');
+    const lowerQuery = query.toLowerCase();
+    let visibleCount = 0;
+    
+    rows.forEach(row => {
+        const text = row.textContent.toLowerCase();
+        if (text.includes(lowerQuery)) {
+            row.style.display = '';
+            visibleCount++;
+        } else {
+            row.style.display = 'none';
+        }
+    });
+    
+    // Update count
+    const countEl = document.getElementById('history-filter-count');
+    if (countEl) {
+        countEl.textContent = visibleCount;
+    }
+}
+
 function applyFix(historyId) {
     if (!confirm('Apply this fix? The folder will be renamed.')) return;
 
-    fetch(`/api/apply_fix/${historyId}`, {method: 'POST'})
-        .then(r => r.json())
-        .then(data => {
-            if (data.success) {
-                showSuccess('Fix applied successfully!', 'Fix Applied');
-                setTimeout(() => location.reload(), 1500);
-            } else {
-                showErrorWithHelp(data.message || 'Unknown error', 'file');
-            }
-        });
+    const row = document.querySelector(`tr[data-history-id="${historyId}"]`) || 
+                Array.from(document.querySelectorAll('tbody tr')).find(r => r.innerHTML.includes(`applyFix(${historyId})`));
+    if (row) {
+        const btn = row.querySelector('button[onclick*="applyFix"]');
+        if (btn) {
+            const originalHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+            
+            fetch(`/api/apply_fix/${historyId}`, {method: 'POST'})
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        // Update status badge
+                        const statusCell = row.querySelector('td:nth-last-child(2)');
+                        if (statusCell) {
+                            statusCell.innerHTML = '<span class="badge bg-success">Applied</span>';
+                        }
+                        // Remove action buttons
+                        const actionCell = row.querySelector('td:last-child');
+                        if (actionCell) {
+                            actionCell.innerHTML = '<span class="text-muted">-</span>';
+                        }
+                        showSuccess('Fix applied successfully!', 'Fix Applied');
+                    } else {
+                        btn.disabled = false;
+                        btn.innerHTML = originalHtml;
+                        showErrorWithHelp(data.message || 'Unknown error', 'file');
+                    }
+                })
+                .catch(e => {
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.innerHTML = originalHtml;
+                    }
+                    showErrorWithHelp('Error: ' + e, 'api');
+                });
+        } else {
+            // Fallback to reload
+            fetch(`/api/apply_fix/${historyId}`, {method: 'POST'})
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        showSuccess('Fix applied successfully!', 'Fix Applied');
+                        setTimeout(() => location.reload(), 1500);
+                    } else {
+                        showErrorWithHelp(data.message || 'Unknown error', 'file');
+                    }
+                });
+        }
+    } else {
+        // Fallback to reload if row not found
+        fetch(`/api/apply_fix/${historyId}`, {method: 'POST'})
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    showSuccess('Fix applied successfully!', 'Fix Applied');
+                    setTimeout(() => location.reload(), 1500);
+                } else {
+                    showErrorWithHelp(data.message || 'Unknown error', 'file');
+                }
+            });
+    }
 }
 
 function undoFix(historyId) {
     if (!confirm('Undo this fix? The folder will be renamed back to its original name.')) return;
 
-    fetch(`/api/undo/${historyId}`, {method: 'POST'})
-        .then(r => r.json())
-        .then(data => {
-            if (data.success) {
-                showSuccess(data.message || 'Fix applied successfully.', 'Fix Applied');
-                setTimeout(() => location.reload(), 1500);
-            } else {
-                showErrorWithHelp(data.error || 'Unknown error', 'file');
-            }
-        })
-        .catch(e => showErrorWithHelp('Error: ' + e, 'api'));
+    const row = Array.from(document.querySelectorAll('tbody tr')).find(r => r.innerHTML.includes(`undoFix(${historyId})`));
+    if (row) {
+        const btn = row.querySelector('button[onclick*="undoFix"]');
+        if (btn) {
+            const originalHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+            
+            fetch(`/api/undo/${historyId}`, {method: 'POST'})
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        // Update status badge
+                        const statusCell = row.querySelector('td:nth-last-child(2)');
+                        if (statusCell) {
+                            statusCell.innerHTML = '<span class="badge bg-info">Undone</span>';
+                        }
+                        // Remove action buttons
+                        const actionCell = row.querySelector('td:last-child');
+                        if (actionCell) {
+                            actionCell.innerHTML = '<span class="text-muted">-</span>';
+                        }
+                        showSuccess(data.message || 'Fix undone successfully.', 'Undone');
+                    } else {
+                        btn.disabled = false;
+                        btn.innerHTML = originalHtml;
+                        showErrorWithHelp(data.error || 'Unknown error', 'file');
+                    }
+                })
+                .catch(e => {
+                    btn.disabled = false;
+                    btn.innerHTML = originalHtml;
+                    showErrorWithHelp('Error: ' + e, 'api');
+                });
+        } else {
+            // Fallback
+            fetch(`/api/undo/${historyId}`, {method: 'POST'})
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        showSuccess(data.message || 'Fix undone successfully.', 'Undone');
+                        setTimeout(() => location.reload(), 1500);
+                    } else {
+                        showErrorWithHelp(data.error || 'Unknown error', 'file');
+                    }
+                })
+                .catch(e => showErrorWithHelp('Error: ' + e, 'api'));
+        }
+    } else {
+        // Fallback
+        fetch(`/api/undo/${historyId}`, {method: 'POST'})
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    showSuccess(data.message || 'Fix undone successfully.', 'Undone');
+                    setTimeout(() => location.reload(), 1500);
+                } else {
+                    showErrorWithHelp(data.error || 'Unknown error', 'file');
+                }
+            })
+            .catch(e => showErrorWithHelp('Error: ' + e, 'api'));
+    }
 }
 
 function rejectFix(historyId) {
     if (!confirm('Reject this fix? It will be deleted and the book will be marked as OK.')) return;
 
-    fetch(`/api/reject_fix/${historyId}`, {method: 'POST'})
-        .then(r => r.json())
-        .then(data => {
-            if (data.success) {
-                showSuccess('Fix rejected - book marked as OK', 'Rejected');
-                setTimeout(() => location.reload(), 1500);
-            } else {
-                showErrorWithHelp(data.error || 'Unknown error', 'database');
-            }
-        })
-        .catch(e => showErrorWithHelp('Error: ' + e, 'api'));
+    const row = Array.from(document.querySelectorAll('tbody tr')).find(r => r.innerHTML.includes(`rejectFix(${historyId})`));
+    if (row) {
+        const btn = row.querySelector('button[onclick*="rejectFix"]');
+        if (btn) {
+            const originalHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+            
+            fetch(`/api/reject_fix/${historyId}`, {method: 'POST'})
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        // Remove the row with fade
+                        row.style.transition = 'opacity 0.3s';
+                        row.style.opacity = '0';
+                        setTimeout(() => row.remove(), 300);
+                        showSuccess('Fix rejected - book marked as OK', 'Rejected');
+                    } else {
+                        btn.disabled = false;
+                        btn.innerHTML = originalHtml;
+                        showErrorWithHelp(data.error || 'Unknown error', 'database');
+                    }
+                })
+                .catch(e => {
+                    btn.disabled = false;
+                    btn.innerHTML = originalHtml;
+                    showErrorWithHelp('Error: ' + e, 'api');
+                });
+        } else {
+            // Fallback
+            fetch(`/api/reject_fix/${historyId}`, {method: 'POST'})
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        showSuccess('Fix rejected - book marked as OK', 'Rejected');
+                        setTimeout(() => location.reload(), 1500);
+                    } else {
+                        showErrorWithHelp(data.error || 'Unknown error', 'database');
+                    }
+                })
+                .catch(e => showErrorWithHelp('Error: ' + e, 'api'));
+        }
+    } else {
+        // Fallback
+        fetch(`/api/reject_fix/${historyId}`, {method: 'POST'})
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    showSuccess('Fix rejected - book marked as OK', 'Rejected');
+                    setTimeout(() => location.reload(), 1500);
+                } else {
+                    showErrorWithHelp(data.error || 'Unknown error', 'database');
+                }
+            })
+            .catch(e => showErrorWithHelp('Error: ' + e, 'api'));
+    }
 }
 
 function retryFix(historyId) {
@@ -237,17 +547,144 @@ function retryFix(historyId) {
 function dismissError(historyId) {
     if (!confirm('Dismiss this error entry? It will be removed from history.')) return;
 
-    fetch(`/api/dismiss_error/${historyId}`, {method: 'POST'})
-        .then(r => r.json())
-        .then(data => {
-            if (data.success) {
-                showSuccess('Error entry dismissed', 'Dismissed');
-                setTimeout(() => location.reload(), 1000);
-            } else {
-                showErrorWithHelp(data.error || 'Unknown error', 'database');
-            }
-        })
-        .catch(e => showErrorWithHelp('Error: ' + e, 'api'));
+    const row = Array.from(document.querySelectorAll('tbody tr')).find(r => r.innerHTML.includes(`dismissError(${historyId})`));
+    if (row) {
+        const btn = row.querySelector('button[onclick*="dismissError"]');
+        if (btn) {
+            const originalHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+            
+            fetch(`/api/dismiss_error/${historyId}`, {method: 'POST'})
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        // Remove the row with fade
+                        row.style.transition = 'opacity 0.3s';
+                        row.style.opacity = '0';
+                        setTimeout(() => row.remove(), 300);
+                        showSuccess('Error entry dismissed', 'Dismissed');
+                    } else {
+                        btn.disabled = false;
+                        btn.innerHTML = originalHtml;
+                        showErrorWithHelp(data.error || 'Unknown error', 'database');
+                    }
+                })
+                .catch(e => {
+                    btn.disabled = false;
+                    btn.innerHTML = originalHtml;
+                    showErrorWithHelp('Error: ' + e, 'api');
+                });
+        } else {
+            // Fallback
+            fetch(`/api/dismiss_error/${historyId}`, {method: 'POST'})
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        showSuccess('Error entry dismissed', 'Dismissed');
+                        setTimeout(() => location.reload(), 1000);
+                    } else {
+                        showErrorWithHelp(data.error || 'Unknown error', 'database');
+                    }
+                })
+                .catch(e => showErrorWithHelp('Error: ' + e, 'api'));
+        }
+    } else {
+        // Fallback
+        fetch(`/api/dismiss_error/${historyId}`, {method: 'POST'})
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    showSuccess('Error entry dismissed', 'Dismissed');
+                    setTimeout(() => location.reload(), 1000);
+                } else {
+                    showErrorWithHelp(data.error || 'Unknown error', 'database');
+                }
+            })
+            .catch(e => showErrorWithHelp('Error: ' + e, 'api'));
+    }
+}
+
+// Smart bulk selection
+function applyQuickSelect() {
+    const select = document.getElementById('quick-select');
+    const value = select.value;
+    if (!value) return;
+    
+    const rows = Array.from(document.querySelectorAll('tbody tr'));
+    const checkboxes = document.querySelectorAll('.fix-checkbox');
+    
+    // Uncheck all first
+    checkboxes.forEach(cb => cb.checked = false);
+    
+    const today = new Date().toISOString().split('T')[0];
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    
+    rows.forEach((row, index) => {
+        if (row.style.display === 'none') return; // Skip hidden rows
+        
+        const text = row.textContent;
+        const checkbox = row.querySelector('.fix-checkbox');
+        if (!checkbox) return;
+        
+        let shouldSelect = false;
+        
+        switch(value) {
+            case 'same_author':
+                // Select items with same author (get first author from row)
+                const firstAuthor = text.match(/Current[\s\S]*?Author:\s*([^\n]+)/)?.[1]?.trim();
+                if (firstAuthor) {
+                    shouldSelect = rows.some((r, i) => i !== index && r.textContent.includes(firstAuthor));
+                }
+                break;
+            case 'same_series':
+                // Select items with series info
+                shouldSelect = text.includes('Series') || text.includes('#');
+                break;
+            case 'safe_fixes':
+                // Select non-drastic changes (no "Review" badge)
+                shouldSelect = !text.includes('Review') && !text.includes('Drastic');
+                break;
+            case 'drastic_changes':
+                // Select drastic changes
+                shouldSelect = text.includes('Review') || text.includes('Drastic');
+                break;
+            case 'today':
+                // Select items added today
+                shouldSelect = text.includes(today.substring(5)); // Match MM-DD
+                break;
+            case 'this_week':
+                // Select items from this week (simplified - check if date is recent)
+                const dateMatch = text.match(/(\d{4}-\d{2}-\d{2})/);
+                if (dateMatch) {
+                    const itemDate = dateMatch[1];
+                    shouldSelect = itemDate >= weekAgo;
+                }
+                break;
+        }
+        
+        if (shouldSelect) {
+            checkbox.checked = true;
+        }
+    });
+    
+    updateBulkApplyButton();
+}
+
+function selectByPattern() {
+    const pattern = document.getElementById('pattern-select').value.trim();
+    if (!pattern) return;
+    
+    const rows = document.querySelectorAll('tbody tr');
+    rows.forEach(row => {
+        if (row.style.display === 'none') return;
+        const text = row.textContent;
+        if (text.includes(pattern)) {
+            const checkbox = row.querySelector('.fix-checkbox');
+            if (checkbox) checkbox.checked = true;
+        }
+    });
+    updateBulkApplyButton();
 }
 
 // Bulk apply/retry functionality

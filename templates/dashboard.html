@@ -243,15 +243,17 @@ function triggerScan() {
     
     // Poll for progress
     let progressInterval = setInterval(() => {
-        fetch('/api/stats')
+        fetch('/api/scan_progress')
             .then(r => r.json())
             .then(data => {
-                if (data.scan_progress) {
+                if (data.active) {
                     progressBar.update(
-                        data.scan_progress.processed || 0,
-                        data.scan_progress.total || 0,
-                        data.scan_progress.status || 'Scanning...'
+                        data.scanned || 0,
+                        data.total || 0,
+                        data.status || 'Scanning...'
                     );
+                } else if (data.scanned > 0) {
+                    progressBar.update(data.scanned, data.total || data.scanned, data.status || 'Complete');
                 }
             })
             .catch(() => {}); // Ignore errors in progress polling
@@ -261,7 +263,7 @@ function triggerScan() {
         .then(r => r.json())
         .then(data => {
             clearInterval(progressInterval);
-            progressBar.remove();
+            setTimeout(() => progressBar.remove(), 2000);
             btn.disabled = false;
             btn.innerHTML = originalHtml;
             if (data.scanned || data.queued) {

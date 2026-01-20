@@ -17,11 +17,13 @@
     <div class="card-body">
         <form method="GET" action="/books" id="filter-form">
             <div class="row g-3">
-                <div class="col-md-4">
+                <div class="col-md-3">
                     <label class="form-label">Search</label>
                     <div class="input-group">
                         <input type="text" class="form-control bg-dark text-light" name="search" 
-                               value="{{ search }}" placeholder="Author, title, or path...">
+                               id="live-search-input"
+                               value="{{ search }}" placeholder="Author, title, or path..."
+                               onkeyup="liveFilter(this.value)">
                         <button class="btn btn-outline-secondary" type="submit">
                             <i class="bi bi-search"></i>
                         </button>
@@ -31,6 +33,27 @@
                             <i class="bi bi-x"></i>
                         </a>
                         {% endif %}
+                    </div>
+                    <small class="text-muted"><span id="filter-count">{{ books|length }}</span> shown</small>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Quick Select</label>
+                    <select class="form-select bg-dark text-light" id="books-quick-select" onchange="applyBooksQuickSelect()">
+                        <option value="">-- Select All Matching --</option>
+                        <option value="same_author">Same Author</option>
+                        <option value="same_status">Same Status</option>
+                        <option value="errors">Errors Only</option>
+                        <option value="pending">Pending Items</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Select by Pattern</label>
+                    <div class="input-group">
+                        <input type="text" class="form-control bg-dark text-light" id="books-pattern-select" 
+                               placeholder="e.g., 'Boyett'">
+                        <button class="btn btn-outline-primary" type="button" onclick="selectBooksByPattern()">
+                            <i class="bi bi-funnel"></i> Select
+                        </button>
                     </div>
                 </div>
                 <div class="col-md-3">
@@ -126,17 +149,36 @@
                     </td>
                     <td>
                         {% if book.status == 'fixed' %}
-                        <span class="badge bg-success">Fixed</span>
+                        <span class="badge bg-success" 
+                              data-bs-toggle="tooltip" 
+                              title="Book has been fixed and folder renamed">
+                            Fixed
+                        </span>
                         {% elif book.status == 'verified' %}
-                        <span class="badge bg-info">Verified</span>
+                        <span class="badge bg-info" 
+                              data-bs-toggle="tooltip" 
+                              title="Book structure verified as correct">
+                            Verified
+                        </span>
                         {% elif book.status == 'pending_fix' %}
-                        <span class="badge bg-warning text-dark">Pending Fix</span>
+                        <span class="badge bg-warning text-dark" 
+                              data-bs-toggle="tooltip" 
+                              title="Fix is pending. Go to History to apply it.">
+                            Pending Fix
+                        </span>
                         {% elif book.status == 'error' %}
-                        <span class="badge bg-danger" title="{{ book.error_message or 'Error' }}">
+                        <span class="badge bg-danger" 
+                              data-bs-toggle="tooltip" 
+                              data-bs-html="true"
+                              title="<strong>Error:</strong> {{ (book.error_message or 'Unknown error') | e }}<br><br>Click Edit to fix the metadata.">
                             Error <i class="bi bi-info-circle"></i>
                         </span>
                         {% else %}
-                        <span class="badge bg-secondary">Pending</span>
+                        <span class="badge bg-secondary" 
+                              data-bs-toggle="tooltip" 
+                              title="Book is pending analysis">
+                            Pending
+                        </span>
                         {% endif %}
                     </td>
                     <td>
@@ -156,7 +198,7 @@
                                 <i class="bi bi-eye"></i>
                             </button>
                             <button class="btn btn-outline-primary btn-sm" 
-                                    onclick="editBook({{ book.id }}, '{{ book.current_author|replace("'", "\\'") }}', '{{ book.current_title|replace("'", "\\'") }}')" 
+                                    onclick="editBook({{ book.id }}, '{{ book.current_author|replace("'", "\\'") }}', '{{ book.current_title|replace("'", "\\'") }}', '{{ book.path|replace("'", "\\'") }}')" 
                                     title="Edit/Fix metadata">
                                 <i class="bi bi-pencil"></i>
                             </button>
@@ -262,6 +304,17 @@
             <div class="modal-body">
                 <input type="hidden" id="edit-book-id">
 
+                <!-- Current Path Display -->
+                <div class="alert alert-info mb-3">
+                    <div class="d-flex align-items-start">
+                        <i class="bi bi-folder me-2 mt-1"></i>
+                        <div class="flex-grow-1">
+                            <strong>Current Path:</strong><br>
+                            <code class="text-light small" id="edit-book-current-path" style="word-break: break-all;">Loading...</code>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Manual Entry -->
                 <div class="row mb-3">
                     <div class="col-md-6">
@@ -342,11 +395,29 @@
                     <strong>Selected:</strong> <span id="edit-selected-match-text"></span>
                     <button type="button" class="btn-close float-end" onclick="clearBookSelection()"></button>
                 </div>
+
+                <!-- Path Preview -->
+                <div id="edit-path-preview" class="alert alert-info d-none mt-3">
+                    <strong>Preview:</strong><br>
+                    <div class="row mt-2">
+                        <div class="col-md-6">
+                            <small class="text-muted">Current:</small><br>
+                            <code class="text-danger small" id="edit-preview-old-path" style="word-break: break-all;"></code>
+                        </div>
+                        <div class="col-md-6">
+                            <small class="text-muted">New:</small><br>
+                            <code class="text-success small" id="edit-preview-new-path" style="word-break: break-all;"></code>
+                        </div>
+                    </div>
+                </div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary" onclick="saveBookFix()">
-                    <i class="bi bi-check-lg"></i> Save as Pending Fix
+                <button type="button" class="btn btn-outline-primary" onclick="saveBookFixAsPending()">
+                    <i class="bi bi-save"></i> Save as Pending
+                </button>
+                <button type="button" class="btn btn-primary" onclick="applyBookFixDirectly()" id="edit-apply-directly-btn">
+                    <i class="bi bi-check-lg"></i> Apply Now
                 </button>
             </div>
         </div>
@@ -440,6 +511,121 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+// Quick actions
+function quickApplyBook(bookId) {
+    // This would need to fetch the pending fix for this book and apply it
+    // For now, just show a message
+    if (confirm('Apply the pending fix for this book?')) {
+        // Fetch pending fix and apply
+        fetch(`/api/book/${bookId}`)
+            .then(r => r.json())
+            .then(data => {
+                if (data.success && data.book.status === 'pending_fix') {
+                    // Find the pending fix in history and apply it
+                    fetch('/api/history?status=pending_fix&book_id=' + bookId)
+                        .then(r => r.json())
+                        .then(histData => {
+                            if (histData.success && histData.items && histData.items.length > 0) {
+                                const fixId = histData.items[0].id;
+                                fetch(`/api/apply_fix/${fixId}`, {method: 'POST'})
+                                    .then(r => r.json())
+                                    .then(applyData => {
+                                        if (applyData.success) {
+                                            showSuccess('Fix applied!', 'Applied');
+                                            setTimeout(() => location.reload(), 1000);
+                                        } else {
+                                            showErrorWithHelp(applyData.message || 'Failed to apply', 'file');
+                                        }
+                                    });
+                            } else {
+                                showWarning('No pending fix found for this book');
+                            }
+                        });
+                } else {
+                    showWarning('This book does not have a pending fix');
+                }
+            });
+    }
+}
+
+// Real-time filtering
+function liveFilter(query) {
+    const rows = document.querySelectorAll('tbody tr');
+    const lowerQuery = query.toLowerCase();
+    let visibleCount = 0;
+    
+    rows.forEach(row => {
+        const text = row.textContent.toLowerCase();
+        if (text.includes(lowerQuery)) {
+            row.style.display = '';
+            visibleCount++;
+        } else {
+            row.style.display = 'none';
+        }
+    });
+    
+    // Update count
+    const countEl = document.getElementById('filter-count');
+    if (countEl) {
+        countEl.textContent = visibleCount;
+    }
+}
+
+// Smart bulk selection for books
+function applyBooksQuickSelect() {
+    const select = document.getElementById('books-quick-select');
+    const value = select.value;
+    if (!value) return;
+    
+    // Note: Books page doesn't have checkboxes by default, this is for future use
+    // For now, just highlight matching rows
+    const rows = Array.from(document.querySelectorAll('tbody tr'));
+    
+    rows.forEach(row => {
+        if (row.style.display === 'none') return;
+        
+        const text = row.textContent;
+        let shouldHighlight = false;
+        
+        switch(value) {
+            case 'same_author':
+                // This would require more complex logic - skip for now
+                break;
+            case 'same_status':
+                // This would require status comparison - skip for now
+                break;
+            case 'errors':
+                shouldHighlight = text.includes('Error') || text.includes('error');
+                break;
+            case 'pending':
+                shouldHighlight = text.includes('Pending') || text.includes('pending');
+                break;
+        }
+        
+        if (shouldHighlight) {
+            row.style.backgroundColor = 'rgba(255, 193, 7, 0.1)';
+        } else {
+            row.style.backgroundColor = '';
+        }
+    });
+}
+
+function selectBooksByPattern() {
+    const pattern = document.getElementById('books-pattern-select').value.trim();
+    if (!pattern) return;
+    
+    const rows = document.querySelectorAll('tbody tr');
+    rows.forEach(row => {
+        if (row.style.display === 'none') return;
+        const text = row.textContent;
+        if (text.includes(pattern)) {
+            row.style.backgroundColor = 'rgba(255, 193, 7, 0.1)';
+        } else {
+            row.style.backgroundColor = '';
+        }
+    });
+}
+
 // Auto-submit search on Enter
 document.addEventListener('DOMContentLoaded', function() {
     const searchInput = document.querySelector('input[name="search"]');
@@ -457,20 +643,117 @@ document.addEventListener('DOMContentLoaded', function() {
 let selectedBookMetadata = null;
 let editBookModal = null;
 
-function editBook(bookId, currentAuthor, currentTitle) {
+function editBook(bookId, currentAuthor, currentTitle, currentPath) {
     document.getElementById('edit-book-id').value = bookId;
     document.getElementById('edit-book-author').value = currentAuthor || '';
     document.getElementById('edit-book-title').value = currentTitle || '';
+    document.getElementById('edit-book-current-path').textContent = currentPath || 'Unknown';
     document.getElementById('edit-search-query').value = currentTitle || '';  // Pre-fill search with title
     document.getElementById('edit-search-results').style.display = 'none';
     document.getElementById('edit-selected-match').classList.add('d-none');
     document.getElementById('edit-audnexus-result').style.display = 'none';
+    document.getElementById('edit-path-preview').classList.add('d-none');
     selectedBookMetadata = null;
 
     if (!editBookModal) {
         editBookModal = new bootstrap.Modal(document.getElementById('editBookModal'));
     }
     editBookModal.show();
+    
+    // Update preview when fields change
+    const authorInput = document.getElementById('edit-book-author');
+    const titleInput = document.getElementById('edit-book-title');
+    authorInput.addEventListener('input', updateBookPathPreview);
+    titleInput.addEventListener('input', updateBookPathPreview);
+}
+
+function updateBookPathPreview() {
+    const author = document.getElementById('edit-book-author').value.trim();
+    const title = document.getElementById('edit-book-title').value.trim();
+    const currentPath = document.getElementById('edit-book-current-path').textContent;
+    const previewDiv = document.getElementById('edit-path-preview');
+    
+    if (!author || !title) {
+        previewDiv.classList.add('d-none');
+        return;
+    }
+    
+    // Show current path
+    document.getElementById('edit-preview-old-path').textContent = currentPath;
+    
+    // Simple preview
+    const simplePreview = `${author}/${title}`;
+    document.getElementById('edit-preview-new-path').textContent = simplePreview + ' (preview)';
+    previewDiv.classList.remove('d-none');
+}
+
+function saveBookFixAsPending() {
+    saveBookFix();
+}
+
+function applyBookFixDirectly() {
+    const bookId = document.getElementById('edit-book-id').value;
+    const author = document.getElementById('edit-book-author').value.trim();
+    const title = document.getElementById('edit-book-title').value.trim();
+    
+    if (!author || !title) {
+        showWarning('Author and title are required.', 'Required Fields');
+        return;
+    }
+    
+    const currentPath = document.getElementById('edit-book-current-path').textContent;
+    
+    // Show preview
+    document.getElementById('edit-preview-old-path').textContent = currentPath;
+    document.getElementById('edit-preview-new-path').textContent = `${author}/${title}`;
+    document.getElementById('edit-path-preview').classList.remove('d-none');
+    
+    // Confirm with preview
+    if (!confirm(`Apply this fix now?\n\nCurrent: ${currentPath}\nNew: ${author}/${title}\n\nThe folder will be renamed immediately.`)) {
+        return;
+    }
+    
+    const btn = document.getElementById('edit-apply-directly-btn');
+    const originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Applying...';
+    
+    const payload = {
+        book_id: parseInt(bookId),
+        author: author,
+        title: title
+    };
+    
+    // Include metadata result if one was selected
+    if (selectedBookMetadata) {
+        payload.metadata_result = selectedBookMetadata;
+    } else if (window._audnexusResult) {
+        payload.metadata_result = window._audnexusResult;
+    }
+    
+    fetch('/api/apply_fix_direct', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+    })
+    .then(r => r.json())
+    .then(data => {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+        
+        if (data.success) {
+            showSuccess('Fix applied successfully!', 'Applied');
+            if (editBookModal) editBookModal.hide();
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            showErrorWithHelp(data.error || 'Unknown error', 'file');
+        }
+    })
+    .catch(e => {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+        showErrorWithHelp('Error: ' + e, 'api');
+    });
 }
 
 function searchAllAPIsForBook() {

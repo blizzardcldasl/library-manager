@@ -361,7 +361,7 @@ def extract_folder_metadata(folder_path):
                                 if asin_match:
                                     asin = asin_match.group(1).upper()
                                     break
-                            except:
+                            except (ValueError, KeyError, TypeError, AttributeError):
                                 pass
                 
                 # Check URL fields
@@ -374,7 +374,7 @@ def extract_folder_metadata(folder_path):
                                 if asin_match:
                                     asin = asin_match.group(1).upper()
                                     break
-                            except:
+                            except (ValueError, KeyError, TypeError, AttributeError):
                                 pass
                 
                 if asin:
@@ -477,6 +477,56 @@ def init_config():
             json.dump(DEFAULT_SECRETS, f, indent=2)
         logger.info(f"Created default secrets at {SECRETS_PATH}")
 
+# ============== ERROR HANDLING & API RESPONSES ==============
+
+def api_response(success=True, data=None, error=None, message=None):
+    """Standard API response format."""
+    response = {
+        'success': success,
+        'data': data,
+        'error': error,
+        'message': message,
+        'timestamp': datetime.now().isoformat()
+    }
+    return jsonify(response)
+
+def handle_errors(func):
+    """Decorator for consistent error handling across API routes."""
+    from functools import wraps
+    
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except FileNotFoundError as e:
+            logger.error(f"File not found in {func.__name__}: {e}", exc_info=True)
+            return api_response(success=False, error=f'File not found: {str(e)}'), 404
+        except PermissionError as e:
+            logger.error(f"Permission denied in {func.__name__}: {e}", exc_info=True)
+            return api_response(success=False, error=f'Permission denied: {str(e)}'), 403
+        except sqlite3.OperationalError as e:
+            logger.error(f"Database error in {func.__name__}: {e}", exc_info=True)
+            return api_response(success=False, error=f'Database error: {str(e)}'), 500
+        except requests.exceptions.Timeout as e:
+            logger.error(f"Timeout in {func.__name__}: {e}", exc_info=True)
+            return api_response(success=False, error=f'Request timeout: {str(e)}'), 504
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"Connection error in {func.__name__}: {e}", exc_info=True)
+            return api_response(success=False, error=f'Connection error: {str(e)}'), 503
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error in {func.__name__}: {e}", exc_info=True)
+            return api_response(success=False, error=f'Invalid JSON response: {str(e)}'), 500
+        except KeyError as e:
+            logger.error(f"Missing key in {func.__name__}: {e}", exc_info=True)
+            return api_response(success=False, error=f'Missing required field: {str(e)}'), 400
+        except TypeError as e:
+            logger.error(f"Type error in {func.__name__}: {e}", exc_info=True)
+            return api_response(success=False, error=f'Type error: {str(e)}'), 400
+        except Exception as e:
+            logger.error(f"Unexpected error in {func.__name__}: {e}", exc_info=True)
+            return api_response(success=False, error=f'Unexpected error: {str(e)}'), 500
+    return wrapper
+
 # ============== DATABASE ==============
 
 def init_db():
@@ -549,8 +599,49 @@ def init_db():
         api_calls INTEGER DEFAULT 0
     )''')
 
+    # Create indexes for frequently queried columns
+    # Books table indexes
+    c.execute('CREATE INDEX IF NOT EXISTS idx_books_path ON books(path)')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_books_status ON books(status)')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_books_author ON books(current_author)')
+    
+    # Queue table indexes
+    c.execute('CREATE INDEX IF NOT EXISTS idx_queue_book_id ON queue(book_id)')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_queue_priority ON queue(priority, added_at)')
+    
+    # History table indexes
+    c.execute('CREATE INDEX IF NOT EXISTS idx_history_status ON history(status)')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_history_book_id ON history(book_id)')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_history_fixed_at ON history(fixed_at DESC)')
+
     conn.commit()
     conn.close()
+
+def migrate_db():
+    """Add indexes to existing databases that don't have them."""
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    c = conn.cursor()
+    
+    try:
+        # Check if indexes exist by querying sqlite_master
+        c.execute("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_books_path'")
+        if not c.fetchone():
+            # Indexes don't exist, add them
+            logger.info("Adding database indexes to existing database...")
+            c.execute('CREATE INDEX IF NOT EXISTS idx_books_path ON books(path)')
+            c.execute('CREATE INDEX IF NOT EXISTS idx_books_status ON books(status)')
+            c.execute('CREATE INDEX IF NOT EXISTS idx_books_author ON books(current_author)')
+            c.execute('CREATE INDEX IF NOT EXISTS idx_queue_book_id ON queue(book_id)')
+            c.execute('CREATE INDEX IF NOT EXISTS idx_queue_priority ON queue(priority, added_at)')
+            c.execute('CREATE INDEX IF NOT EXISTS idx_history_status ON history(status)')
+            c.execute('CREATE INDEX IF NOT EXISTS idx_history_book_id ON history(book_id)')
+            c.execute('CREATE INDEX IF NOT EXISTS idx_history_fixed_at ON history(fixed_at DESC)')
+            conn.commit()
+            logger.info("Database indexes added successfully")
+    except Exception as e:
+        logger.error(f"Error adding database indexes: {e}")
+    finally:
+        conn.close()
 
 def get_db():
     """Get database connection with timeout to avoid lock issues."""
@@ -558,6 +649,95 @@ def get_db():
     conn.row_factory = sqlite3.Row
     conn.execute('PRAGMA journal_mode=WAL')  # Better concurrent access
     return conn
+
+# ============== DATABASE QUERY HELPERS ==============
+
+def get_book_by_path(path):
+    """Get book by path with optional caching."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT * FROM books WHERE path = ?', (path,))
+    result = c.fetchone()
+    conn.close()
+    return dict(result) if result else None
+
+def get_queue_items(limit=None, status_filter=None, priority_sort=True):
+    """Get queue items with optional filtering and sorting."""
+    conn = get_db()
+    c = conn.cursor()
+    
+    query = '''SELECT q.id, q.reason, q.added_at, q.priority,
+                      b.id as book_id, b.path, b.current_author, b.current_title
+               FROM queue q
+               JOIN books b ON q.book_id = b.id'''
+    
+    params = []
+    if status_filter:
+        query += ' WHERE b.status = ?'
+        params.append(status_filter)
+    
+    if priority_sort:
+        query += ' ORDER BY q.priority, q.added_at'
+    else:
+        query += ' ORDER BY q.added_at DESC'
+    
+    if limit:
+        query += ' LIMIT ?'
+        params.append(limit)
+    
+    c.execute(query, params)
+    results = c.fetchall()
+    conn.close()
+    return [dict(row) for row in results]
+
+def get_history_items(page=1, per_page=50, status_filter=None, book_id=None):
+    """Get history items with pagination and optional filtering."""
+    conn = get_db()
+    c = conn.cursor()
+    
+    offset = (page - 1) * per_page
+    
+    query = '''SELECT h.*, b.path as book_path
+               FROM history h
+               JOIN books b ON h.book_id = b.id
+               WHERE 1=1'''
+    
+    params = []
+    if status_filter:
+        query += ' AND h.status = ?'
+        params.append(status_filter)
+    
+    if book_id:
+        query += ' AND h.book_id = ?'
+        params.append(book_id)
+    
+    query += ' ORDER BY h.fixed_at DESC LIMIT ? OFFSET ?'
+    params.extend([per_page, offset])
+    
+    c.execute(query, params)
+    results = c.fetchall()
+    
+    # Get total count
+    count_query = 'SELECT COUNT(*) as count FROM history h WHERE 1=1'
+    count_params = []
+    if status_filter:
+        count_query += ' AND h.status = ?'
+        count_params.append(status_filter)
+    if book_id:
+        count_query += ' AND h.book_id = ?'
+        count_params.append(book_id)
+    
+    c.execute(count_query, count_params)
+    total = c.fetchone()['count']
+    conn.close()
+    
+    return {
+        'items': [dict(row) for row in results],
+        'total': total,
+        'page': page,
+        'per_page': per_page,
+        'total_pages': (total + per_page - 1) // per_page
+    }
 
 # ============== CONFIG ==============
 
@@ -944,6 +1124,49 @@ def clean_search_title(messy_name):
 # BookDB API endpoint (our private metadata service)
 BOOKDB_API_URL = "https://bookdb.deucebucket.com"
 
+# File listing cache for performance
+_audio_file_cache = {}  # path -> [files]
+_cache_timestamp = {}  # path -> timestamp
+
+# API result cache for metadata searches
+_api_cache = {}  # hash(query) -> (timestamp, result)
+API_CACHE_TTL = 86400  # 24 hours default
+
+def search_with_cache(query_key, search_func, cache_ttl=API_CACHE_TTL):
+    """
+    Wrapper function to cache API search results.
+    query_key: Unique identifier for the search (e.g., MD5 hash of query)
+    search_func: Function to call if cache miss
+    cache_ttl: Time to live in seconds (default 24 hours)
+    """
+    import hashlib
+    
+    # Generate cache key from query_key
+    if isinstance(query_key, str):
+        cache_key = hashlib.md5(query_key.encode()).hexdigest()
+    else:
+        cache_key = hashlib.md5(str(query_key).encode()).hexdigest()
+    
+    # Check cache
+    if cache_key in _api_cache:
+        cached_time, result = _api_cache[cache_key]
+        if time.time() - cached_time < cache_ttl:
+            logger.debug(f"API cache hit for: {query_key[:50]}")
+            return result
+        else:
+            # Cache expired
+            del _api_cache[cache_key]
+    
+    # Cache miss - call function
+    try:
+        result = search_func()
+        _api_cache[cache_key] = (time.time(), result)
+        logger.debug(f"API cache miss - stored result for: {query_key[:50]}")
+        return result
+    except Exception as e:
+        logger.debug(f"API search error (not cached): {e}")
+        return None
+
 def search_bookdb(title, author=None, api_key=None):
     """
     Search our private BookDB metadata service.
@@ -1206,7 +1429,7 @@ def search_audnexus(title, author=None, asin=None, region='us'):
             try:
                 error_text = resp.text[:200]
                 logger.debug(f"Audnexus error response: {error_text}")
-            except:
+            except (OSError, PermissionError, ValueError, KeyError):
                 pass
             return None
     except requests.exceptions.Timeout:
@@ -1344,7 +1567,13 @@ def lookup_book_metadata(messy_name, config, folder_path=None):
     bookdb_key = config.get('bookdb_api_key')
     if bookdb_key:
         try:
-            result = validate_result(search_bookdb(clean_title, author=author_hint, api_key=bookdb_key), clean_title)
+            cache_key = f"bookdb:{clean_title}:{author_hint or ''}"
+            result = search_with_cache(
+                cache_key,
+                lambda: search_bookdb(clean_title, author=author_hint, api_key=bookdb_key),
+                cache_ttl=API_CACHE_TTL
+            )
+            result = validate_result(result, clean_title)
             if result:
                 return result
         except Exception as e:
@@ -1352,23 +1581,47 @@ def lookup_book_metadata(messy_name, config, folder_path=None):
             # Continue to other APIs
 
     # 1. Try Audnexus (best for audiobooks, pulls from Audible)
-    result = validate_result(search_audnexus(clean_title, author=author_hint), clean_title)
+    cache_key = f"audnexus:{clean_title}:{author_hint or ''}"
+    result = search_with_cache(
+        cache_key,
+        lambda: search_audnexus(clean_title, author=author_hint),
+        cache_ttl=API_CACHE_TTL
+    )
+    result = validate_result(result, clean_title)
     if result:
         return result
 
     # 2. Try OpenLibrary (free, huge database)
-    result = validate_result(search_openlibrary(clean_title, author=author_hint), clean_title)
+    cache_key = f"openlibrary:{clean_title}:{author_hint or ''}"
+    result = search_with_cache(
+        cache_key,
+        lambda: search_openlibrary(clean_title, author=author_hint),
+        cache_ttl=API_CACHE_TTL
+    )
+    result = validate_result(result, clean_title)
     if result:
         return result
 
     # 3. Try Google Books
     google_key = config.get('google_books_api_key')
-    result = validate_result(search_google_books(clean_title, author=author_hint, api_key=google_key), clean_title)
+    cache_key = f"googlebooks:{clean_title}:{author_hint or ''}"
+    result = search_with_cache(
+        cache_key,
+        lambda: search_google_books(clean_title, author=author_hint, api_key=google_key),
+        cache_ttl=API_CACHE_TTL
+    )
+    result = validate_result(result, clean_title)
     if result:
         return result
 
     # 4. Try Hardcover.app (modern Goodreads alternative)
-    result = validate_result(search_hardcover(clean_title, author=author_hint), clean_title)
+    cache_key = f"hardcover:{clean_title}:{author_hint or ''}"
+    result = search_with_cache(
+        cache_key,
+        lambda: search_hardcover(clean_title, author=author_hint),
+        cache_ttl=API_CACHE_TTL
+    )
+    result = validate_result(result, clean_title)
     if result:
         return result
 
@@ -1399,8 +1652,13 @@ def gather_all_api_candidates(title, author=None, config=None):
 
     for api_name, search_func in apis:
         try:
-            # Search with author hint
-            result = search_func(clean_title, author)
+            # Search with author hint (with caching)
+            cache_key = f"{api_name.lower()}:{clean_title}:{author or ''}"
+            result = search_with_cache(
+                cache_key,
+                lambda sf=search_func: sf(clean_title, author),
+                cache_ttl=API_CACHE_TTL
+            )
             if result:
                 # Filter garbage matches
                 suggested_title = result.get('title', '')
@@ -1412,7 +1670,12 @@ def gather_all_api_candidates(title, author=None, config=None):
 
             # Also search without author (might find different results)
             if author:
-                result_no_author = search_func(clean_title, None)
+                cache_key_no_author = f"{api_name.lower()}:{clean_title}:"
+                result_no_author = search_with_cache(
+                    cache_key_no_author,
+                    lambda sf=search_func: sf(clean_title, None),
+                    cache_ttl=API_CACHE_TTL
+                )
                 if result_no_author:
                     suggested_title = result_no_author.get('title', '')
                     if is_garbage_match(clean_title, suggested_title):
@@ -2141,15 +2404,24 @@ def find_orphan_audio_files(lib_path):
     """Find audio files sitting directly in author folders (not in book subfolders)."""
     orphans = []
 
-    for author_dir in Path(lib_path).iterdir():
-        if not author_dir.is_dir():
-            continue
-
+    # Use os.scandir for better performance
+    try:
+        with os.scandir(str(lib_path)) as entries:
+            author_dirs = [Path(entry.path) for entry in entries if entry.is_dir()]
+    except (OSError, PermissionError) as e:
+        logger.warning(f"Error reading library path {lib_path}: {e}")
+        return
+    
+    for author_dir in author_dirs:
         author = author_dir.name
 
         # Find audio files directly in author folder
-        direct_audio = [f for f in author_dir.iterdir()
-                       if f.is_file() and f.suffix.lower() in AUDIO_EXTENSIONS]
+        try:
+            with os.scandir(str(author_dir)) as entries:
+                direct_audio = [Path(entry.path) for entry in entries 
+                               if entry.is_file() and Path(entry.path).suffix.lower() in AUDIO_EXTENSIONS]
+        except (OSError, PermissionError):
+            continue
 
         if direct_audio:
             # Group files by potential book (using metadata or filename patterns)
@@ -2211,10 +2483,14 @@ def organize_orphan_files(author_path, book_title, files, config=None):
 
     # Check if folder already exists
     if book_dir.exists():
-        # Check if it's empty or has files
-        existing = list(book_dir.iterdir())
-        if existing:
-            return False, f"Folder already exists with {len(existing)} items: {book_dir}"
+        # Check if it's empty or has files (use os.scandir for better performance)
+        try:
+            with os.scandir(str(book_dir)) as entries:
+                existing = list(entries)
+                if existing:
+                    return False, f"Folder already exists with {len(existing)} items: {book_dir}"
+        except (OSError, PermissionError):
+            return False, f"Cannot access folder: {book_dir}"
     else:
         book_dir.mkdir(parents=True)
 
@@ -3799,9 +4075,12 @@ def scan_folder_recursive(folder_path, library_root, config, conn, c,
         logger.debug(f"Skipping disc/chapter folder: {path_str}")
         return scanned, queued, issues_found
     
-    # Get all items in this folder
+    # Get all items in this folder (use os.scandir for better performance)
     try:
-        items = list(folder_path.iterdir())
+        items = []
+        with os.scandir(str(folder_path)) as entries:
+            for entry in entries:
+                items.append(Path(entry.path))
     except PermissionError:
         logger.warning(f"Permission denied: {path_str}")
         return scanned, queued, issues_found
@@ -4200,6 +4479,7 @@ def deep_scan_library(config):
     Deep scan library - the AUTISTIC LIBRARIAN approach.
     Finds ALL issues, duplicates, and structural problems.
     """
+    global scan_progress
     conn = get_db()
     c = conn.cursor()
 
@@ -4212,6 +4492,7 @@ def deep_scan_library(config):
     file_names = {}  # basename -> list of paths
 
     logger.info("=== DEEP LIBRARY SCAN STARTING ===")
+    scan_progress = {"active": True, "current_path": "", "scanned": 0, "total": 0, "status": "Initializing scan..."}
 
     for lib_path_str in config.get('library_paths', []):
         lib_path = Path(lib_path_str)
@@ -4247,11 +4528,15 @@ def deep_scan_library(config):
             continue
 
         logger.info(f"Scanning: {lib_path}")
+        scan_progress["current_path"] = str(lib_path)
+        scan_progress["status"] = f"Scanning: {lib_path}"
 
         # First pass: Find all audio files to understand actual book locations
         try:
+            scan_progress["status"] = "Finding all audio files..."
             all_audio_files = find_audio_files(lib_path)
             logger.info(f"Found {len(all_audio_files)} audio files")
+            scan_progress["total"] = len(all_audio_files)
         except OSError as e:
             if e.errno == 116:  # Stale file handle
                 logger.error(f"Stale file handle when scanning for audio files in {lib_path}. The filesystem may be unmounted or unavailable.")
@@ -4317,9 +4602,10 @@ def deep_scan_library(config):
         # NEW: Detect loose files in library root (no folder structure)
         loose_files = []
         try:
-            for item in lib_path.iterdir():
-                if item.is_file() and item.suffix.lower() in AUDIO_EXTENSIONS:
-                    loose_files.append(item)
+            with os.scandir(str(lib_path)) as entries:
+                for entry in entries:
+                    if entry.is_file() and Path(entry.path).suffix.lower() in AUDIO_EXTENSIONS:
+                        loose_files.append(Path(entry.path))
         except OSError as e:
             if e.errno == 116:  # Stale file handle
                 logger.error(f"Stale file handle when reading library directory: {lib_path}. The filesystem may be unmounted or unavailable.")
@@ -4366,9 +4652,10 @@ def deep_scan_library(config):
         if config.get('ebook_management', False):
             loose_ebooks = []
             try:
-                for item in lib_path.iterdir():
-                    if item.is_file() and item.suffix.lower() in EBOOK_EXTENSIONS:
-                        loose_ebooks.append(item)
+                with os.scandir(str(lib_path)) as entries:
+                    for entry in entries:
+                        if entry.is_file() and Path(entry.path).suffix.lower() in EBOOK_EXTENSIONS:
+                            loose_ebooks.append(Path(entry.path))
             except OSError as e:
                 if e.errno == 116:  # Stale file handle
                     logger.error(f"Stale file handle when reading library directory for ebooks: {lib_path}. The filesystem may be unmounted or unavailable.")
@@ -4407,15 +4694,19 @@ def deep_scan_library(config):
         # Second pass: Recursively analyze folder structure
         logger.info("Starting recursive folder structure analysis...")
         try:
+            scan_progress["status"] = "Analyzing folder structure..."
             s, q, i = scan_folder_recursive(lib_path, lib_path, config, conn, c,
                                            author_context=None, series_context=None,
                                            depth=0, max_depth=5)
             scanned += s
             queued += q
             issues_found.update(i)
+            scan_progress["scanned"] = scanned
+            scan_progress["status"] = f"Recursive scan complete: {s} scanned, {q} queued"
             logger.info(f"Recursive scan complete: {s} scanned, {q} queued")
         except Exception as e:
             logger.error(f"Error during recursive folder scan: {e}", exc_info=True)
+            scan_progress["status"] = f"Error during scan: {str(e)}"
             # Continue to duplicate detection even if recursive scan fails
 
     # Third pass: Flag duplicates
@@ -4448,6 +4739,8 @@ def deep_scan_library(config):
     logger.info(f"Scanned: {scanned} new books")
     logger.info(f"Queued: {queued} books with issues")
     logger.info(f"Total issues found: {len(issues_found)} locations")
+
+    scan_progress = {"active": False, "current_path": "", "scanned": scanned, "total": scanned, "status": "Scan complete"}
 
     return scanned, queued
 
@@ -4781,10 +5074,12 @@ def process_queue(config, limit=None):
 
                     if new_path.exists():
                         # Destination already exists - check if it has files
-                        existing_files = list(new_path.iterdir())
-                        if existing_files:
-                            # Try to find a unique path by adding version distinguishers
-                            logger.info(f"CONFLICT: {new_path} exists, trying version-aware naming...")
+                        try:
+                            with os.scandir(str(new_path)) as entries:
+                                existing_files = list(entries)
+                                if existing_files:
+                                    # Try to find a unique path by adding version distinguishers
+                                    logger.info(f"CONFLICT: {new_path} exists, trying version-aware naming...")
                             resolved_path = None
 
                             # Try distinguishers in order: narrator, variant, edition, year
@@ -4999,17 +5294,20 @@ def apply_fix(history_id):
                 return False, error_msg
             else:
                 # Moving a folder - check if destination has files
-                existing_files = list(new_path.iterdir())
-                if existing_files:
-                    # DON'T MERGE - this is likely a different narrator version
-                    error_msg = "Destination folder already exists with files - possible different narrator version"
-                    c.execute('UPDATE history SET status = ?, error_message = ? WHERE id = ?',
-                             ('error', error_msg, history_id))
-                    conn.commit()
-                    conn.close()
-                    return False, error_msg
-                else:
-                    # Destination is empty folder - safe to use it
+                try:
+                    with os.scandir(str(new_path)) as entries:
+                        existing_files = list(entries)
+                        if existing_files:
+                            # DON'T MERGE - this is likely a different narrator version
+                            error_msg = "Destination folder already exists with files - possible different narrator version"
+                            c.execute('UPDATE history SET status = ?, error_message = ? WHERE id = ?',
+                                     ('error', error_msg, history_id))
+                            conn.commit()
+                            conn.close()
+                            return False, error_msg
+                except (OSError, PermissionError):
+                    pass
+                # Destination is empty folder - safe to use it
                     shutil.move(str(old_path), str(new_path.parent / (new_path.name + "_temp")))
                     new_path.rmdir()
                     (new_path.parent / (new_path.name + "_temp")).rename(new_path)
@@ -5049,6 +5347,7 @@ def apply_fix(history_id):
 worker_thread = None
 worker_running = False
 processing_status = {"active": False, "processed": 0, "total": 0, "current": "", "errors": []}
+scan_progress = {"active": False, "current_path": "", "scanned": 0, "total": 0, "status": ""}
 
 def process_all_queue(config):
     """Process ALL items in the queue in batches, respecting rate limits."""
@@ -5199,24 +5498,30 @@ def dashboard():
     conn = get_db()
     c = conn.cursor()
 
-    # Get counts
-    c.execute('SELECT COUNT(*) as count FROM books')
-    total_books = c.fetchone()['count']
+    # Consolidated query for books stats
+    c.execute('''
+        SELECT 
+            COUNT(*) as total_books,
+            SUM(CASE WHEN status = 'fixed' THEN 1 ELSE 0 END) as fixed_count,
+            SUM(CASE WHEN status = 'verified' THEN 1 ELSE 0 END) as verified_count
+        FROM books
+    ''')
+    books_stats = c.fetchone()
+    total_books = books_stats['total_books'] or 0
+    fixed_count = books_stats['fixed_count'] or 0
+    verified_count = books_stats['verified_count'] or 0
 
-    c.execute('SELECT COUNT(*) as count FROM queue')
-    queue_size = c.fetchone()['count']
-
-    c.execute("SELECT COUNT(*) as count FROM books WHERE status = 'fixed'")
-    fixed_count = c.fetchone()['count']
-
-    c.execute("SELECT COUNT(*) as count FROM books WHERE status = 'verified'")
-    verified_count = c.fetchone()['count']
-
-    c.execute("SELECT COUNT(*) as count FROM history WHERE status = 'pending_fix'")
-    pending_fixes = c.fetchone()['count']
-
-    c.execute("SELECT COUNT(*) as count FROM history WHERE status = 'error'")
-    error_fixes = c.fetchone()['count']
+    # Consolidated query for queue and history stats
+    c.execute('''
+        SELECT 
+            (SELECT COUNT(*) FROM queue) as queue_size,
+            (SELECT COUNT(*) FROM history WHERE status = 'pending_fix') as pending_fixes,
+            (SELECT COUNT(*) FROM history WHERE status = 'error') as error_fixes
+    ''')
+    other_stats = c.fetchone()
+    queue_size = other_stats['queue_size'] or 0
+    pending_fixes = other_stats['pending_fixes'] or 0
+    error_fixes = other_stats['error_fixes'] or 0
 
     # Get recent history
     c.execute('''SELECT h.*, b.path FROM history h
@@ -5532,9 +5837,31 @@ def api_check_path():
 @app.route('/api/scan', methods=['POST'])
 def api_scan():
     """Trigger a library scan."""
+    global scan_progress
     config = load_config()
-    scanned, queued = scan_library(config)
-    return jsonify({'success': True, 'scanned': scanned, 'queued': queued})
+    try:
+        scan_progress = {"active": True, "current_path": "", "scanned": 0, "total": 0, "status": "Starting scan..."}
+        scanned, queued = scan_library(config)
+        scan_progress = {"active": False, "current_path": "", "scanned": scanned, "total": scanned, "status": "Complete"}
+        return jsonify({'success': True, 'scanned': scanned, 'queued': queued})
+    except Exception as e:
+        logger.error(f"Scan error: {e}", exc_info=True)
+        scan_progress = {"active": False, "current_path": "", "scanned": 0, "total": 0, "status": f"Error: {str(e)}"}
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/scan_progress')
+def api_scan_progress():
+    """Get current scan progress."""
+    global scan_progress
+    percent = (scan_progress['scanned'] / scan_progress['total'] * 100) if scan_progress['total'] > 0 else 0
+    return jsonify({
+        'active': scan_progress['active'],
+        'current': scan_progress['current_path'],
+        'scanned': scan_progress['scanned'],
+        'total': scan_progress['total'],
+        'percent': percent,
+        'status': scan_progress['status']
+    })
 
 @app.route('/api/chaos_scan', methods=['POST'])
 def api_chaos_scan():
@@ -5858,6 +6185,7 @@ def api_process_status():
     return jsonify(processing_status)
 
 @app.route('/api/apply_fix/<int:history_id>', methods=['POST'])
+@handle_errors
 def api_apply_fix(history_id):
     """Apply a specific fix."""
     success, message = apply_fix(history_id)
@@ -7316,7 +7644,6 @@ def api_manual_fix_book():
         return jsonify({'success': False, 'error': 'Could not determine library root'})
 
     # Build new path using the same logic as build_new_path
-    from pathlib import Path
     library_root_path = Path(library_root)
     
     # Extract metadata for path building
@@ -7380,6 +7707,218 @@ def api_manual_fix_book():
     return jsonify({
         'success': True,
         'message': f'Saved pending fix: {old_author}/{old_title} → {new_author}/{new_title}',
+        'old_path': old_path,
+        'new_path': new_path
+    })
+
+@app.route('/api/apply_fix_direct', methods=['POST'])
+def api_apply_fix_direct():
+    """
+    Apply a fix immediately without creating a pending entry first.
+    Used for direct apply from edit modals.
+    """
+    data = request.get_json() or {}
+    book_id = data.get('book_id')
+
+    # Manual entry fields
+    new_author = data.get('author', '').strip()
+    new_title = data.get('title', '').strip()
+
+    # Or metadata API result
+    metadata_result = data.get('metadata_result')
+
+    if not book_id:
+        return jsonify({'success': False, 'error': 'book_id required'})
+
+    conn = get_db()
+    c = conn.cursor()
+
+    # Get the book
+    c.execute('SELECT * FROM books WHERE id = ?', (book_id,))
+    book = c.fetchone()
+    if not book:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Book not found'})
+
+    book = dict(book)
+    old_path = book['path']
+    old_author = book['current_author']
+    old_title = book['current_title']
+
+    # Determine new values from metadata result
+    if metadata_result:
+        new_author = metadata_result.get('author') or metadata_result.get('author_name') or new_author
+        new_title = metadata_result.get('title') or metadata_result.get('name') or new_title
+        series_name = metadata_result.get('series') or metadata_result.get('series_name')
+        series_pos = metadata_result.get('series_position') or metadata_result.get('series_num')
+        if series_name and series_pos:
+            new_title = f"{new_title} ({series_name} #{int(series_pos) if series_pos == int(series_pos) else series_pos})"
+
+    if not new_author or not new_title:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Author and title required'})
+
+    # Build new path
+    config = load_config()
+    library_paths = config.get('library_paths', [])
+
+    # Find which library this book is in
+    library_root = None
+    for lib_path in library_paths:
+        if old_path.startswith(lib_path):
+            library_root = lib_path
+            break
+
+    if not library_root:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Could not determine library root'})
+
+    library_root_path = Path(library_root)
+    
+    # Extract metadata for path building
+    series_name = None
+    series_num = None
+    narrator = None
+    year = None
+    
+    if metadata_result:
+        series_name = metadata_result.get('series') or metadata_result.get('series_name')
+        series_num = metadata_result.get('series_position') or metadata_result.get('series_num')
+        narrator = metadata_result.get('narrator')
+        year = metadata_result.get('year') or metadata_result.get('year_published')
+    
+    # Count audio files for multi-part book detection
+    audio_file_count = None
+    old_path_obj = Path(old_path)
+    if old_path_obj.exists() and old_path_obj.is_dir():
+        try:
+            audio_files = find_audio_files(str(old_path_obj))
+            audio_file_count = len(audio_files) if audio_files else 0
+        except Exception as e:
+            logger.debug(f"Could not count audio files for {old_path_obj}: {e}")
+    
+    # Use build_new_path for consistent path building
+    new_path = build_new_path(
+        library_root_path,
+        new_author,
+        new_title,
+        series=series_name,
+        series_num=series_num,
+        narrator=narrator,
+        year=year,
+        config=config,
+        audio_file_count=audio_file_count
+    )
+    
+    if not new_path:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Invalid author or title - cannot build path'})
+    
+    new_path = str(new_path)
+
+    # Validate paths are in library (safety check)
+    library_paths_resolved = [Path(p).resolve() for p in library_paths]
+    old_path_resolved = Path(old_path).resolve()
+    new_path_resolved = Path(new_path).resolve()
+    
+    old_in_library = False
+    for lib in library_paths_resolved:
+        try:
+            old_path_resolved.relative_to(lib.resolve())
+            old_in_library = True
+            break
+        except ValueError:
+            continue
+    
+    new_in_library = False
+    for lib in library_paths_resolved:
+        try:
+            new_path_resolved.relative_to(lib.resolve())
+            new_in_library = True
+            break
+        except ValueError:
+            continue
+
+    if not old_in_library or not new_in_library:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Path outside library boundaries'})
+
+    # Check path depth
+    for lib in library_paths_resolved:
+        try:
+            relative = new_path_resolved.relative_to(lib.resolve())
+            if len(relative.parts) < 2:
+                conn.close()
+                return jsonify({'success': False, 'error': 'Path too shallow - would dump at author level'})
+            break
+        except ValueError:
+            continue
+
+    old_path_obj = Path(old_path)
+    new_path_obj = Path(new_path)
+
+    if not old_path_obj.exists():
+        conn.close()
+        return jsonify({'success': False, 'error': f'Source path no longer exists: {old_path}'})
+
+    existing_files = []
+    if new_path_obj.exists() and new_path != old_path:
+        if new_path_obj.is_file():
+            conn.close()
+            return jsonify({'success': False, 'error': f'Destination file already exists: {new_path}'})
+        else:
+            try:
+                with os.scandir(str(new_path_obj)) as entries:
+                    existing_files = list(entries)
+                    if existing_files:
+                        conn.close()
+                        return jsonify({'success': False, 'error': 'Destination folder already exists with files'})
+            except (OSError, PermissionError) as e:
+                logger.debug(f"Error checking destination folder: {e}")
+                # Continue - will handle error during move
+
+    # Apply the fix (rename/move)
+    try:
+        import shutil
+        is_file_move = old_path_obj.is_file()
+        
+        if new_path_obj.exists() and new_path_obj.is_dir() and not existing_files:
+            # Empty destination folder - remove it first
+            shutil.rmtree(new_path_obj)
+        
+        if is_file_move:
+            # Moving a file
+            new_path_obj.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(old_path_obj), str(new_path_obj))
+        else:
+            # Moving a folder
+            new_path_obj.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(old_path_obj), str(new_path_obj))
+        
+        logger.info(f"Applied fix directly: {old_path} → {new_path}")
+        
+    except Exception as e:
+        error_msg = f"Error applying fix: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        conn.close()
+        return jsonify({'success': False, 'error': error_msg})
+
+    # Update book record
+    c.execute('UPDATE books SET path = ?, current_author = ?, current_title = ?, status = ? WHERE id = ?',
+             (new_path, new_author, new_title, 'fixed', book_id))
+
+    # Create history entry with status='fixed'
+    c.execute('''
+        INSERT INTO history (book_id, old_author, old_title, new_author, new_title, old_path, new_path, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'fixed')
+    ''', (book_id, old_author, old_title, new_author, new_title, old_path, new_path))
+
+    conn.commit()
+    conn.close()
+
+    return jsonify({
+        'success': True,
+        'message': f'Fix applied: {old_author}/{old_title} → {new_author}/{new_title}',
         'old_path': old_path,
         'new_path': new_path
     })
@@ -8264,6 +8803,7 @@ def api_backup_info():
 if __name__ == '__main__':
     init_config()  # Create config files if they don't exist
     init_db()
+    migrate_db()  # Ensure indexes exist on existing databases
     start_worker()
     port = int(os.environ.get('PORT', 5757))
     app.run(host='0.0.0.0', port=port, debug=False)
