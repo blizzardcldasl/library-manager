@@ -44,6 +44,9 @@ metadata_scraper/
 PROJECT_BIBLE.md
 metadata_scraper/PROJECT_BIBLE.md
 
+# Planning and review documents - internal development docs
+planning/
+
 # User screenshots
 static/Screenshot*
 static/Untitled*

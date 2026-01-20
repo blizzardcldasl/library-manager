@@ -874,6 +874,7 @@ def is_placeholder_author(name):
 # - Hardcover: Beta API, be conservative - 1 req/2sec
 API_RATE_LIMITS = {
     'audnexus': {'last_call': 0, 'min_delay': 1.5},      # 1.5 sec between calls
+    'audimeta': {'last_call': 0, 'min_delay': 0.5},      # 0.5 sec between calls (120 RPM = 2/sec, be conservative)
     'openlibrary': {'last_call': 0, 'min_delay': 1.5},   # 1.5 sec between calls
     'googlebooks': {'last_call': 0, 'min_delay': 2.5},   # 2.5 sec between calls (stricter)
     'hardcover': {'last_call': 0, 'min_delay': 2.5},     # 2.5 sec between calls (beta)
@@ -1374,7 +1375,7 @@ def search_audnexus(title, author=None, asin=None, region='us'):
             url += f"?region={region}"
         
         logger.debug(f"Audnexus ASIN lookup: {url}")
-        resp = requests.get(url, timeout=10, headers={'Accept': 'application/json'})
+        resp = requests.get(url, timeout=5, headers={'Accept': 'application/json'})  # Reduced timeout to 5s
         
         if resp.status_code == 200:
             book = resp.json()
@@ -1403,21 +1404,27 @@ def search_audnexus(title, author=None, asin=None, region='us'):
                 error_msg = error_data.get('message', '').lower()
                 if 'not available in region' in error_msg:
                     logger.debug(f"Audnexus: ASIN {asin} not available in region '{region}'")
-                    # Try other regions as fallback (common regions first)
+                    # Try other regions as fallback (common regions first, limit to 3 attempts to avoid long waits)
                     fallback_regions = ['us', 'uk', 'au', 'ca', 'de', 'es', 'fr', 'in', 'it', 'jp']
                     # Remove the region we already tried
                     fallback_regions = [r for r in fallback_regions if r != region]
+                    # Limit to first 3 fallback attempts to avoid long waits
+                    fallback_regions = fallback_regions[:3]
                     
                     for fallback_region in fallback_regions:
                         logger.debug(f"Audnexus: Trying {fallback_region.upper()} region as fallback for ASIN {asin}")
-                        fallback_result = search_audnexus(title, author, asin, region=fallback_region)
-                        if fallback_result:
-                            # Add note about region fallback
-                            fallback_result['region_fallback'] = f"Found in {fallback_region.upper()} (not available in {region.upper()})"
-                            return fallback_result
+                        try:
+                            fallback_result = search_audnexus(title, author, asin, region=fallback_region)
+                            if fallback_result:
+                                # Add note about region fallback
+                                fallback_result['region_fallback'] = f"Found in {fallback_region.upper()} (not available in {region.upper()})"
+                                return fallback_result
+                        except Exception as fallback_error:
+                            logger.debug(f"Audnexus: Fallback to {fallback_region} failed: {fallback_error}")
+                            continue
                     
-                    # If we get here, tried all regions and none worked
-                    logger.debug(f"Audnexus: ASIN {asin} not available in any region")
+                    # If we get here, tried fallback regions and none worked
+                    logger.debug(f"Audnexus: ASIN {asin} not available in {region.upper()} or common fallback regions")
                     return None
                 else:
                     logger.warning(f"Audnexus: Server error for ASIN {asin}: {error_data.get('message', 'Unknown error')}")
@@ -1441,6 +1448,153 @@ def search_audnexus(title, author=None, asin=None, region='us'):
     except Exception as e:
         logger.warning(f"Audnexus search failed for ASIN {asin}: {e}")
         return None
+
+def search_audimeta(asin=None, title=None, author=None, region='us'):
+    """Search AudiMeta API - faster alternative to Audnexus for Audible metadata.
+    
+    AudiMeta is a community-hosted service that provides faster, more reliable
+    Audible metadata lookups compared to Audnexus. Supports both ASIN lookups
+    and title/author searches.
+    
+    Args:
+        asin: ASIN (Audible product ID) - optional if title/author provided
+        title: Book title for search - optional if ASIN provided
+        author: Author name for search - optional
+        region: Region code (default: 'us')
+    
+    Returns:
+        dict with title, author, year, narrator, series, source, or None if not found
+        For searches, returns the first/best match from results
+    """
+    rate_limit_wait('audimeta')
+    
+    try:
+        # If ASIN provided, do direct lookup
+        if asin:
+            url = f"https://audimeta.de/api/v1/books/{asin}"
+            if region and region != 'us':
+                url += f"?region={region}"
+            
+            logger.debug(f"AudiMeta ASIN lookup: {url}")
+            resp = requests.get(url, timeout=5, headers={'Accept': 'application/json'})
+            
+            if resp.status_code == 200:
+                book = resp.json()
+                if book and book.get('title'):
+                    result = {
+                        'title': book.get('title', ''),
+                        'author': book.get('authors', [{}])[0].get('name', '') if book.get('authors') else '',
+                        'year': book.get('releaseDate', '')[:4] if book.get('releaseDate') else None,
+                        'narrator': book.get('narrators', [{}])[0].get('name', '') if book.get('narrators') else None,
+                        'series': book.get('series', {}).get('name') if isinstance(book.get('series'), dict) else book.get('series'),
+                        'series_position': book.get('series', {}).get('position') if isinstance(book.get('series'), dict) else book.get('series_position'),
+                        'asin': asin,
+                        'source': 'audimeta',
+                        'description': book.get('description'),
+                        'genres': book.get('genres', []),
+                        'cover_url': book.get('cover', {}).get('url') if isinstance(book.get('cover'), dict) else book.get('coverUrl')
+                    }
+                    if result['title'] and result['author']:
+                        logger.info(f"AudiMeta found via ASIN {asin}: {result['author']} - {result['title']}")
+                        return result
+                    else:
+                        logger.warning(f"AudiMeta: Incomplete result for ASIN {asin} (missing title or author)")
+                        return None
+            elif resp.status_code == 404:
+                logger.debug(f"AudiMeta: ASIN {asin} not found (404)")
+                return None
+            else:
+                logger.debug(f"AudiMeta: Unexpected status {resp.status_code} for ASIN {asin}")
+                return None
+        
+        # If title provided, do search
+        elif title:
+            import urllib.parse
+            # Build search query
+            query_params = {'title': title}
+            if author:
+                query_params['author'] = author
+            if region and region != 'us':
+                query_params['region'] = region
+            
+            # AudiMeta search endpoint
+            url = f"https://audimeta.de/api/v1/search?" + urllib.parse.urlencode(query_params)
+            
+            logger.debug(f"AudiMeta search: {url}")
+            resp = requests.get(url, timeout=5, headers={'Accept': 'application/json'})
+            
+            if resp.status_code == 200:
+                data = resp.json()
+                # AudiMeta search returns a list of results
+                books = data.get('books', []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+                
+                if books and len(books) > 0:
+                    # Get first result (best match)
+                    book = books[0]
+                    result = {
+                        'title': book.get('title', ''),
+                        'author': book.get('authors', [{}])[0].get('name', '') if book.get('authors') else '',
+                        'year': book.get('releaseDate', '')[:4] if book.get('releaseDate') else None,
+                        'narrator': book.get('narrators', [{}])[0].get('name', '') if book.get('narrators') else None,
+                        'series': book.get('series', {}).get('name') if isinstance(book.get('series'), dict) else book.get('series'),
+                        'series_position': book.get('series', {}).get('position') if isinstance(book.get('series'), dict) else book.get('series_position'),
+                        'asin': book.get('asin'),
+                        'source': 'audimeta',
+                        'description': book.get('description'),
+                        'genres': book.get('genres', []),
+                        'cover_url': book.get('cover', {}).get('url') if isinstance(book.get('cover'), dict) else book.get('coverUrl')
+                    }
+                    if result['title'] and result['author']:
+                        logger.info(f"AudiMeta found via search '{title}': {result['author']} - {result['title']}")
+                        return result
+                    else:
+                        logger.warning(f"AudiMeta: Incomplete search result for '{title}' (missing title or author)")
+                        return None
+                else:
+                    logger.debug(f"AudiMeta: No results found for search '{title}'")
+                    return None
+            elif resp.status_code == 404:
+                logger.debug(f"AudiMeta: No results found for search '{title}' (404)")
+                return None
+            else:
+                logger.debug(f"AudiMeta: Unexpected status {resp.status_code} for search '{title}'")
+                return None
+        else:
+            logger.debug("AudiMeta: No ASIN or title provided - skipping")
+            return None
+            
+    except requests.exceptions.Timeout:
+        logger.warning(f"AudiMeta: Request timeout for {'ASIN ' + asin if asin else 'search: ' + title}")
+        return None
+    except requests.exceptions.ConnectionError as e:
+        logger.warning(f"AudiMeta: Connection error for {'ASIN ' + asin if asin else 'search: ' + title} - {e}")
+        return None
+    except Exception as e:
+        logger.warning(f"AudiMeta search failed for {'ASIN ' + asin if asin else 'search: ' + title}: {e}")
+        return None
+
+
+def search_audible_metadata(asin=None, title=None, author=None, region='us'):
+    """Search for Audible metadata - tries AudiMeta first, falls back to Audnexus.
+    
+    This provides better coverage and faster response times by trying
+    the faster AudiMeta service first, then falling back to Audnexus.
+    
+    Supports both ASIN lookups and title/author searches.
+    """
+    # Try AudiMeta first (faster, better coverage, supports title/author search)
+    result = search_audimeta(asin=asin, title=title, author=author, region=region)
+    if result:
+        return result
+    
+    # Fallback to Audnexus (only supports ASIN lookups)
+    if asin:
+        logger.debug(f"AudiMeta failed, trying Audnexus for ASIN {asin}")
+        return search_audnexus(title=title, author=author, asin=asin, region=region)
+    else:
+        logger.debug(f"AudiMeta failed for '{title}', Audnexus requires ASIN - skipping")
+        return None
+
 
 def search_hardcover(title, author=None):
     """Search Hardcover.app API for book metadata."""
@@ -1580,16 +1734,32 @@ def lookup_book_metadata(messy_name, config, folder_path=None):
             logger.debug(f"BookDB search failed (non-blocking): {e}")
             # Continue to other APIs
 
-    # 1. Try Audnexus (best for audiobooks, pulls from Audible)
-    cache_key = f"audnexus:{clean_title}:{author_hint or ''}"
-    result = search_with_cache(
-        cache_key,
-        lambda: search_audnexus(clean_title, author=author_hint),
-        cache_ttl=API_CACHE_TTL
-    )
-    result = validate_result(result, clean_title)
-    if result:
-        return result
+    # 1. Try AudiMeta (best for audiobooks, supports title/author search AND ASIN)
+    # Check if we have ASIN from folder metadata
+    asin_from_folder = folder_hints.get('asin') if folder_hints else None
+    
+    if asin_from_folder:
+        # We have ASIN - use direct lookup
+        cache_key = f"audimeta_asin:{asin_from_folder}"
+        result = search_with_cache(
+            cache_key,
+            lambda: search_audible_metadata(asin=asin_from_folder, region='us'),
+            cache_ttl=API_CACHE_TTL
+        )
+        result = validate_result(result, clean_title)
+        if result:
+            return result
+    else:
+        # No ASIN - try title/author search with AudiMeta
+        cache_key = f"audimeta_search:{clean_title}:{author_hint or ''}"
+        result = search_with_cache(
+            cache_key,
+            lambda: search_audible_metadata(title=clean_title, author=author_hint, region='us'),
+            cache_ttl=API_CACHE_TTL
+        )
+        result = validate_result(result, clean_title)
+        if result:
+            return result
 
     # 2. Try OpenLibrary (free, huge database)
     cache_key = f"openlibrary:{clean_title}:{author_hint or ''}"
@@ -1645,6 +1815,7 @@ def gather_all_api_candidates(title, author=None, config=None):
     apis = [
         ('BookDB', lambda t, a: search_bookdb(t, a, config.get('bookdb_api_key') if config else None)),
         ('Audnexus', search_audnexus),
+        ('AudiMeta', lambda t, a: None),  # AudiMeta requires ASIN, handled separately
         ('OpenLibrary', search_openlibrary),
         ('GoogleBooks', lambda t, a: search_google_books(t, a, config.get('google_books_api_key') if config else None)),
         ('Hardcover', search_hardcover),
@@ -8517,7 +8688,7 @@ def api_abs_remove_exclude():
 
 @app.route('/api/search_audnexus_asin')
 def api_search_audnexus_asin():
-    """Search Audnexus API using ASIN for manual metadata lookup."""
+    """Search Audible metadata APIs (AudiMeta + Audnexus) using ASIN for manual metadata lookup."""
     asin = request.args.get('asin', '').strip().upper()
     region = request.args.get('region', 'us').strip().lower()
     
@@ -8529,7 +8700,8 @@ def api_search_audnexus_asin():
         return jsonify({'error': 'Invalid ASIN format. ASIN must be 10 alphanumeric characters (e.g., B002V5H8FK)', 'result': None})
     
     try:
-        result = search_audnexus(title=None, author=None, asin=asin, region=region)
+        # Use search_audible_metadata which tries AudiMeta first, then Audnexus
+        result = search_audible_metadata(asin=asin, region=region)
         
         if result:
             # Check if this was a region fallback
@@ -8553,7 +8725,7 @@ def api_search_audnexus_asin():
         else:
             return jsonify({
                 'success': False,
-                'error': f'No book found for ASIN {asin} in any available region. The ASIN may be invalid, not an audiobook, or not in the Audnexus database.',
+                'error': f'No book found for ASIN {asin} in any available region. The ASIN may be invalid, not an audiobook, or not available in AudiMeta/Audnexus databases.',
                 'result': None
             })
     except Exception as e:
@@ -8580,9 +8752,10 @@ def api_search_all_apis():
     
     # Search each API
     # Note: Audnexus requires ASIN - skip in GUI search since ASIN not available from query
+    # AudiMeta now supports title/author search, so we can include it
     # Audnexus will still work in automatic metadata lookup when ASIN is found in audio files
     apis = [
-        # ('Audnexus', lambda: search_audnexus(clean_title, author=author, asin=None)),  # Requires ASIN
+        ('AudiMeta', lambda: search_audimeta(title=clean_title, author=author, region='us')),  # Supports title/author search
         ('OpenLibrary', lambda: search_openlibrary(clean_title, author=author)),
         ('Google Books', lambda: search_google_books(clean_title, author=author, api_key=config.get('google_books_api_key'))),
         ('Hardcover', lambda: search_hardcover(clean_title, author=author)),

@@ -295,7 +295,7 @@
 
 <!-- Edit Book Modal -->
 <div class="modal fade" id="editBookModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
+    <div class="modal-dialog modal-xl">
         <div class="modal-content bg-dark">
             <div class="modal-header">
                 <h5 class="modal-title"><i class="bi bi-pencil"></i> Edit Book Metadata</h5>
@@ -315,90 +315,211 @@
                     </div>
                 </div>
 
-                <!-- Manual Entry -->
-                <div class="row mb-3">
-                    <div class="col-md-6">
-                        <label class="form-label">Author</label>
-                        <input type="text" class="form-control bg-dark text-light" id="edit-book-author" placeholder="Author Name">
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label">Title</label>
-                        <input type="text" class="form-control bg-dark text-light" id="edit-book-title" placeholder="Book Title">
-                    </div>
-                </div>
-
-                <hr class="text-muted">
-
-                <!-- Audnexus ASIN Search -->
-                <div class="mb-3">
-                    <label class="form-label"><i class="bi bi-upc"></i> Audnexus ASIN Lookup</label>
-                    <div class="input-group mb-2">
-                        <input type="text" class="form-control bg-dark text-light" id="edit-audnexus-asin" placeholder="Enter ASIN (e.g., B002V5H8FK)" maxlength="10" style="text-transform: uppercase;">
-                        <select class="form-select bg-dark text-light" id="edit-audnexus-region" style="max-width: 100px;">
-                            <option value="us">US</option>
-                            <option value="uk">UK</option>
-                            <option value="au">AU</option>
-                            <option value="ca">CA</option>
-                            <option value="de">DE</option>
-                            <option value="es">ES</option>
-                            <option value="fr">FR</option>
-                            <option value="in">IN</option>
-                            <option value="it">IT</option>
-                            <option value="jp">JP</option>
-                        </select>
-                        <button class="btn btn-outline-primary" type="button" onclick="searchAudnexusASINForBook()" id="edit-search-audnexus-btn">
-                            <i class="bi bi-search"></i> Lookup ASIN
+                <!-- Tabbed Interface -->
+                <ul class="nav nav-tabs mb-3" id="bookMetadataTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="book-manual-tab" data-bs-toggle="tab" data-bs-target="#book-manual-pane" type="button" role="tab">
+                            <i class="bi bi-pencil-square"></i> Manual Entry
                         </button>
-                    </div>
-                    <small class="text-muted">Enter Audible ASIN (10 characters) to fetch metadata from Audnexus</small>
-                </div>
-
-                <!-- Audnexus Result -->
-                <div id="edit-audnexus-result" class="mb-3" style="display: none;">
-                    <div id="edit-audnexus-result-content"></div>
-                </div>
-
-                <hr class="text-muted">
-
-                <!-- Search All APIs -->
-                <div class="mb-3">
-                    <label class="form-label"><i class="bi bi-search"></i> Search All Metadata Sources</label>
-                    <div class="input-group mb-2">
-                        <input type="text" class="form-control bg-dark text-light" id="edit-search-query" placeholder="Search by title or author...">
-                        <button class="btn btn-primary" type="button" onclick="searchAllAPIsForBook()" id="edit-search-all-apis-btn">
-                            <i class="bi bi-search"></i> Search All APIs
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="book-asin-tab" data-bs-toggle="tab" data-bs-target="#book-asin-pane" type="button" role="tab">
+                            <i class="bi bi-upc"></i> ASIN Lookup
                         </button>
-                        <button class="btn btn-outline-info" type="button" onclick="searchBookDBForBook()" id="edit-search-bookbucket-btn" title="Search only BookBucket">
-                            <i class="bi bi-database"></i> BookBucket Only
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="book-search-tab" data-bs-toggle="tab" data-bs-target="#book-search-pane" type="button" role="tab">
+                            <i class="bi bi-search"></i> Search APIs
                         </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="book-quick-match-tab" data-bs-toggle="tab" data-bs-target="#book-quick-match-pane" type="button" role="tab">
+                            <i class="bi bi-lightning"></i> Quick Match
+                        </button>
+                    </li>
+                </ul>
+
+                <div class="tab-content" id="bookMetadataTabContent">
+                    <!-- Manual Entry Tab -->
+                    <div class="tab-pane fade show active" id="book-manual-pane" role="tabpanel">
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label"><i class="bi bi-person"></i> Author</label>
+                                <input type="text" class="form-control bg-dark text-light" id="edit-book-author" placeholder="Author Name">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label"><i class="bi bi-book"></i> Title</label>
+                                <input type="text" class="form-control bg-dark text-light" id="edit-book-title" placeholder="Book Title">
+                            </div>
+                        </div>
+                        <div class="row mb-3">
+                            <div class="col-md-4">
+                                <label class="form-label"><i class="bi bi-collection"></i> Series</label>
+                                <input type="text" class="form-control bg-dark text-light" id="edit-book-series" placeholder="Series Name (optional)">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label"><i class="bi bi-hash"></i> Series Position</label>
+                                <input type="text" class="form-control bg-dark text-light" id="edit-book-series-position" placeholder="1, 2, 3... (optional)">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label"><i class="bi bi-mic"></i> Narrator</label>
+                                <input type="text" class="form-control bg-dark text-light" id="edit-book-narrator" placeholder="Narrator (optional)">
+                            </div>
+                        </div>
+                        <div class="alert alert-secondary">
+                            <small><i class="bi bi-info-circle"></i> Enter metadata manually or use other tabs to search for it.</small>
+                        </div>
                     </div>
-                    <small class="text-muted">Searches: OpenLibrary, Google Books, Hardcover, and BookBucket</small>
+
+                    <!-- ASIN Lookup Tab -->
+                    <div class="tab-pane fade" id="book-asin-pane" role="tabpanel">
+                        <div class="mb-3">
+                            <label class="form-label"><i class="bi bi-upc"></i> Audible ASIN Lookup</label>
+                            <div class="input-group mb-2">
+                                <input type="text" class="form-control bg-dark text-light" id="edit-audnexus-asin" placeholder="Enter ASIN (e.g., B002V5H8FK)" maxlength="10" style="text-transform: uppercase;">
+                                <select class="form-select bg-dark text-light" id="edit-audnexus-region" style="max-width: 120px;">
+                                    <option value="us">🇺🇸 US</option>
+                                    <option value="uk">🇬🇧 UK</option>
+                                    <option value="au">🇦🇺 AU</option>
+                                    <option value="ca">🇨🇦 CA</option>
+                                    <option value="de">🇩🇪 DE</option>
+                                    <option value="es">🇪🇸 ES</option>
+                                    <option value="fr">🇫🇷 FR</option>
+                                    <option value="in">🇮🇳 IN</option>
+                                    <option value="it">🇮🇹 IT</option>
+                                    <option value="jp">🇯🇵 JP</option>
+                                </select>
+                                <button class="btn btn-primary" type="button" onclick="searchAudnexusASINForBook()" id="edit-search-audnexus-btn">
+                                    <i class="bi bi-search"></i> Lookup
+                                </button>
+                            </div>
+                            <small class="text-muted">
+                                <i class="bi bi-info-circle"></i> Searches AudiMeta (faster) and Audnexus. Enter 10-character Audible ASIN.
+                            </small>
+                        </div>
+
+                        <!-- ASIN Result -->
+                        <div id="edit-audnexus-result" class="mb-3" style="display: none;">
+                            <div id="edit-audnexus-result-content"></div>
+                        </div>
+                    </div>
+
+                    <!-- Search APIs Tab -->
+                    <div class="tab-pane fade" id="book-search-pane" role="tabpanel">
+                        <div class="mb-3">
+                            <label class="form-label"><i class="bi bi-search"></i> Search All Metadata Sources</label>
+                            <div class="input-group mb-2">
+                                <input type="text" class="form-control bg-dark text-light" id="edit-search-query" placeholder="Search by title or author...">
+                                <button class="btn btn-primary" type="button" onclick="searchAllAPIsForBook()" id="edit-search-all-apis-btn">
+                                    <i class="bi bi-search"></i> Search All
+                                </button>
+                                <button class="btn btn-outline-info" type="button" onclick="searchBookDBForBook()" id="edit-search-bookbucket-btn" title="Search only BookBucket">
+                                    <i class="bi bi-database"></i> BookBucket
+                                </button>
+                            </div>
+                            <small class="text-muted">
+                                <i class="bi bi-info-circle"></i> Searches: AudiMeta, OpenLibrary, Google Books, Hardcover, and BookBucket
+                            </small>
+                        </div>
+
+                        <!-- Search Status -->
+                        <div id="edit-search-status" class="mb-2 d-none">
+                            <div class="d-flex align-items-center">
+                                <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
+                                <small class="text-muted" id="edit-search-status-text">Searching APIs...</small>
+                            </div>
+                        </div>
+
+                        <!-- Search Results -->
+                        <div id="edit-search-results" class="mb-3" style="max-height: 450px; overflow-y: auto; display: none;">
+                            <div id="edit-search-results-list">
+                                <!-- Results inserted here - grouped by source -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Quick Match Tab -->
+                    <div class="tab-pane fade" id="book-quick-match-pane" role="tabpanel">
+                        <div class="alert alert-warning mb-3">
+                            <i class="bi bi-lightning-fill"></i> <strong>Quick Match</strong> automatically finds and selects the best match from all metadata sources.
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Search Query</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control bg-dark text-light" id="edit-quick-match-query" placeholder="Enter book title or author...">
+                                <button class="btn btn-primary" type="button" onclick="quickMatchForBook()" id="edit-quick-match-btn">
+                                    <i class="bi bi-lightning"></i> Quick Match
+                                </button>
+                            </div>
+                            <small class="text-muted">Searches all providers and auto-selects the best match if confidence is high enough.</small>
+                        </div>
+                        <div id="edit-quick-match-result" style="display: none;">
+                            <div id="edit-quick-match-result-content"></div>
+                        </div>
+                    </div>
                 </div>
 
-                <!-- Search Status -->
-                <div id="edit-search-status" class="mb-2 d-none">
-                    <div class="d-flex align-items-center">
-                        <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
-                        <small class="text-muted" id="edit-search-status-text">Searching APIs...</small>
+                <!-- Selected Match Display -->
+                <div id="edit-selected-match" class="alert alert-success d-none mt-3">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div class="flex-grow-1">
+                            <strong><i class="bi bi-check-circle"></i> Selected Match:</strong><br>
+                            <span id="edit-selected-match-text"></span>
+                        </div>
+                        <button type="button" class="btn-close" onclick="clearBookSelection()" aria-label="Clear selection"></button>
                     </div>
                 </div>
 
-                <!-- Search Results -->
-                <div id="edit-search-results" class="mb-3" style="max-height: 400px; overflow-y: auto; display: none;">
-                    <div id="edit-search-results-list">
-                        <!-- Results inserted here - grouped by source -->
+                <!-- Field Selection (when match selected) -->
+                <div id="edit-field-selection" class="card bg-secondary bg-opacity-25 mt-3 d-none">
+                    <div class="card-header">
+                        <small><i class="bi bi-check2-square"></i> Select fields to import:</small>
                     </div>
-                </div>
-
-                <!-- Selected Match -->
-                <div id="edit-selected-match" class="alert alert-success d-none">
-                    <strong>Selected:</strong> <span id="edit-selected-match-text"></span>
-                    <button type="button" class="btn-close float-end" onclick="clearBookSelection()"></button>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="edit-field-author" checked>
+                                    <label class="form-check-label" for="edit-field-author">Author</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="edit-field-title" checked>
+                                    <label class="form-check-label" for="edit-field-title">Title</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="edit-field-series">
+                                    <label class="form-check-label" for="edit-field-series">Series Name</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="edit-field-series-position">
+                                    <label class="form-check-label" for="edit-field-series-position">Series Position</label>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="edit-field-narrator">
+                                    <label class="form-check-label" for="edit-field-narrator">Narrator</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="edit-field-year">
+                                    <label class="form-check-label" for="edit-field-year">Year</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="edit-field-description">
+                                    <label class="form-check-label" for="edit-field-description">Description</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="edit-field-cover">
+                                    <label class="form-check-label" for="edit-field-cover">Cover Art</label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Path Preview -->
                 <div id="edit-path-preview" class="alert alert-info d-none mt-3">
-                    <strong>Preview:</strong><br>
+                    <strong><i class="bi bi-eye"></i> Preview:</strong><br>
                     <div class="row mt-2">
                         <div class="col-md-6">
                             <small class="text-muted">Current:</small><br>
@@ -649,9 +770,29 @@ function editBook(bookId, currentAuthor, currentTitle, currentPath) {
     document.getElementById('edit-book-title').value = currentTitle || '';
     document.getElementById('edit-book-current-path').textContent = currentPath || 'Unknown';
     document.getElementById('edit-search-query').value = currentTitle || '';  // Pre-fill search with title
+    document.getElementById('edit-quick-match-query').value = currentTitle || '';  // Pre-fill quick match
     document.getElementById('edit-search-results').style.display = 'none';
     document.getElementById('edit-selected-match').classList.add('d-none');
+    document.getElementById('edit-field-selection').classList.add('d-none');
     document.getElementById('edit-audnexus-result').style.display = 'none';
+    document.getElementById('edit-quick-match-result').style.display = 'none';
+    selectedBookMetadata = null;
+    window._audnexusResultForBook = null;
+    
+    // Reset field selection checkboxes
+    const fieldChecks = ['edit-field-author', 'edit-field-title', 'edit-field-series', 'edit-field-series-position', 'edit-field-narrator', 'edit-field-year', 'edit-field-description', 'edit-field-cover'];
+    fieldChecks.forEach(id => {
+        const checkbox = document.getElementById(id);
+        if (checkbox) {
+            checkbox.checked = (id === 'edit-field-author' || id === 'edit-field-title');
+        }
+    });
+    
+    // Switch to manual tab
+    const manualTab = document.getElementById('book-manual-tab');
+    if (manualTab) {
+        manualTab.click();
+    }
     document.getElementById('edit-path-preview').classList.add('d-none');
     selectedBookMetadata = null;
 
@@ -917,66 +1058,291 @@ function searchAudnexusASINForBook() {
     resultContent.innerHTML = '<div class="text-center"><div class="spinner-border spinner-border-sm text-primary"></div> Searching...</div>';
     resultDiv.style.display = 'block';
 
-    fetch(`/api/search_audnexus_asin?asin=${asin}&region=${region}`)
-        .then(r => r.json())
+    // Add timeout to prevent hanging (30 seconds max)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+    fetch(`/api/search_audnexus_asin?asin=${asin}&region=${region}`, { signal: controller.signal })
+        .then(r => {
+            clearTimeout(timeoutId);
+            return r.json();
+        })
         .then(data => {
+            clearTimeout(timeoutId);
             btn.disabled = false;
             if (data.success && data.result) {
                 const result = data.result;
+                const sourceName = result.source === 'audimeta' ? 'AudiMeta' : 'Audnexus';
+                const series = result.series ? ` (${result.series}${result.series_position ? ' #' + result.series_position : ''})` : '';
+                const year = result.year ? ` <span class="text-muted">(${result.year})</span>` : '';
+                const narrator = result.narrator ? ` <small class="text-info">Narrated by ${result.narrator}</small>` : '';
+                
                 resultContent.innerHTML = `
-                    <div class="card bg-success bg-opacity-25">
-                        <div class="card-body">
-                            <h6>${escapeHtml(result.title || 'Unknown')}</h6>
-                            <p class="mb-1"><strong>Author:</strong> ${escapeHtml(result.author || 'Unknown')}</p>
-                            ${result.narrator ? `<p class="mb-1"><strong>Narrator:</strong> ${escapeHtml(result.narrator)}</p>` : ''}
-                            ${result.year ? `<p class="mb-1"><strong>Year:</strong> ${result.year}</p>` : ''}
-                            <button class="btn btn-sm btn-success mt-2" onclick="selectBookMetadata(${JSON.stringify(result).replace(/"/g, '&quot;')})">
-                                <i class="bi bi-check"></i> Use This
-                            </button>
-                        </div>
+                    <div class="list-group">
+                        <a href="#" class="list-group-item list-group-item-action bg-dark text-light"
+                           onclick="selectAudnexusResultForBook(); return false;">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div class="flex-grow-1">
+                                    <div class="fw-bold">${escapeHtml(result.title || 'Unknown')}</div>
+                                    <div class="text-info">${escapeHtml(result.author || 'Unknown')}${year}</div>
+                                    ${series ? `<div class="text-warning small">${escapeHtml(series)}</div>` : ''}
+                                    ${narrator}
+                                    <div class="text-muted small mt-1">ASIN: ${escapeHtml(result.asin || asin)} | Region: ${data.region.toUpperCase()}</div>
+                                </div>
+                                <span class="badge bg-primary ms-2">${sourceName}</span>
+                            </div>
+                        </a>
                     </div>
                 `;
+                
+                // Store result for selection
+                window._audnexusResultForBook = result;
             } else {
                 resultContent.innerHTML = `<div class="alert alert-warning">${escapeHtml(data.error || 'No result found')}</div>`;
             }
         })
         .catch(e => {
+            clearTimeout(timeoutId);
             btn.disabled = false;
-            resultContent.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(e.message)}</div>`;
+            let errorMsg = 'Unknown error';
+            if (e.name === 'AbortError') {
+                errorMsg = 'Request timed out after 30 seconds. The ASIN may not be available or the service may be slow.';
+            } else {
+                errorMsg = e.message || e.toString();
+            }
+            resultContent.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(errorMsg)}</div>`;
         });
 }
 
 function selectBookMetadata(result) {
     selectedBookMetadata = result;
     
-    // Update form fields
-    if (result.author || result.author_name) {
+    // Apply field selection if checkboxes are checked
+    if (document.getElementById('edit-field-author')?.checked && (result.author || result.author_name)) {
         document.getElementById('edit-book-author').value = result.author || result.author_name;
     }
-    if (result.title || result.name) {
-        let title = result.title || result.name;
-        if (result.series || result.series_name) {
-            const pos = result.series_position || result.series_num;
-            if (pos) {
-                title = `${title} (${result.series || result.series_name} #${pos})`;
-            }
-        }
-        document.getElementById('edit-book-title').value = title;
+    if (document.getElementById('edit-field-title')?.checked && (result.title || result.name)) {
+        document.getElementById('edit-book-title').value = result.title || result.name;
     }
-
+    if (document.getElementById('edit-field-series')?.checked && (result.series || result.series_name)) {
+        document.getElementById('edit-book-series').value = result.series || result.series_name;
+    }
+    if (document.getElementById('edit-field-series-position')?.checked && (result.series_position || result.series_num)) {
+        document.getElementById('edit-book-series-position').value = result.series_position || result.series_num;
+    }
+    if (document.getElementById('edit-field-narrator')?.checked && result.narrator) {
+        document.getElementById('edit-book-narrator').value = result.narrator;
+    }
+    
     // Show selected match
     const selectedDiv = document.getElementById('edit-selected-match');
     const selectedText = document.getElementById('edit-selected-match-text');
-    selectedText.textContent = `${result.author || result.author_name || 'Unknown'} - ${result.title || result.name || 'Unknown'}`;
+    const series = (result.series || result.series_name) ? ` (${result.series || result.series_name}${(result.series_position || result.series_num) ? ' #' + (result.series_position || result.series_num) : ''})` : '';
+    selectedText.textContent = `${result.author || result.author_name || 'Unknown'} - ${result.title || result.name || 'Unknown'}${series}`;
     selectedDiv.classList.remove('d-none');
+    
+    // Show field selection panel
+    document.getElementById('edit-field-selection').classList.remove('d-none');
+    
+    // Switch to manual tab
+    const manualTab = document.getElementById('book-manual-tab');
+    if (manualTab) {
+        manualTab.click();
+    }
 
     // Scroll to selected match
     selectedDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
+function selectAudnexusResultForBook() {
+    if (!window._audnexusResultForBook) {
+        return;
+    }
+    
+    const book = window._audnexusResultForBook;
+    const sourceName = book.source === 'audimeta' ? 'AudiMeta' : 'Audnexus';
+    
+    // Apply field selection if checkboxes are checked
+    if (document.getElementById('edit-field-author')?.checked && book.author) {
+        document.getElementById('edit-book-author').value = book.author;
+    }
+    if (document.getElementById('edit-field-title')?.checked && book.title) {
+        document.getElementById('edit-book-title').value = book.title;
+    }
+    if (document.getElementById('edit-field-series')?.checked && book.series) {
+        document.getElementById('edit-book-series').value = book.series;
+    }
+    if (document.getElementById('edit-field-series-position')?.checked && book.series_position) {
+        document.getElementById('edit-book-series-position').value = book.series_position;
+    }
+    if (document.getElementById('edit-field-narrator')?.checked && book.narrator) {
+        document.getElementById('edit-book-narrator').value = book.narrator;
+    }
+    
+    // Store selected result
+    selectedBookMetadata = {
+        author_name: book.author,
+        name: book.title,
+        title: book.title,
+        series_name: book.series,
+        series_position: book.series_position,
+        year_published: book.year,
+        narrator: book.narrator,
+        source: book.source || 'audnexus',
+        asin: book.asin
+    };
+    
+    // Show selected match
+    const matchDiv = document.getElementById('edit-selected-match');
+    const matchText = document.getElementById('edit-selected-match-text');
+    const series = book.series ? ` (${book.series}${book.series_position ? ' #' + book.series_position : ''})` : '';
+    matchText.textContent = `${book.author || 'Unknown'} - ${book.title || 'Unknown'}${series} [${sourceName}]`;
+    matchDiv.classList.remove('d-none');
+    
+    // Show field selection panel
+    document.getElementById('edit-field-selection').classList.remove('d-none');
+    
+    // Switch to manual tab
+    const manualTab = document.getElementById('book-manual-tab');
+    if (manualTab) {
+        manualTab.click();
+    }
+    
+    // Hide search results
+    document.getElementById('edit-audnexus-result').style.display = 'none';
+}
+
 function clearBookSelection() {
     selectedBookMetadata = null;
+    window._audnexusResultForBook = null;
     document.getElementById('edit-selected-match').classList.add('d-none');
+    document.getElementById('edit-field-selection').classList.add('d-none');
+}
+
+function quickMatchForBook() {
+    const query = document.getElementById('edit-quick-match-query').value.trim();
+    const author = document.getElementById('edit-book-author').value.trim();
+    const title = document.getElementById('edit-book-title').value.trim();
+    
+    // Use existing title/author if query is empty
+    const searchQuery = query || (title ? `${author ? author + ' - ' : ''}${title}` : '');
+    
+    if (!searchQuery || searchQuery.length < 2) {
+        showWarning('Please enter a search query or fill in author/title fields.', 'Search Required');
+        return;
+    }
+    
+    const btn = document.getElementById('edit-quick-match-btn');
+    const resultDiv = document.getElementById('edit-quick-match-result');
+    const resultContent = document.getElementById('edit-quick-match-result-content');
+    const originalHtml = btn.innerHTML;
+    
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Matching...';
+    resultContent.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary me-2"></div>Searching all providers...</div>';
+    resultDiv.style.display = 'block';
+    
+    // Search all APIs
+    const searchUrl = `/api/search_all_apis?q=${encodeURIComponent(searchQuery)}${author ? '&author=' + encodeURIComponent(author) : ''}`;
+    
+    fetch(searchUrl)
+        .then(r => r.json())
+        .then(data => {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+            
+            if (data.error || !data.results_by_source || Object.keys(data.results_by_source).length === 0) {
+                resultContent.innerHTML = '<div class="alert alert-warning">No results found. Try manual search or ASIN lookup.</div>';
+                return;
+            }
+            
+            // Find best match (first result from most reliable source)
+            const priority = ['BookBucket', 'Google Books', 'OpenLibrary', 'Hardcover'];
+            let bestMatch = null;
+            let bestSource = null;
+            
+            for (const source of priority) {
+                if (data.results_by_source[source] && data.results_by_source[source].length > 0) {
+                    bestMatch = data.results_by_source[source][0];
+                    bestSource = source;
+                    break;
+                }
+            }
+            
+            if (!bestMatch) {
+                const firstSource = Object.keys(data.results_by_source)[0];
+                bestMatch = data.results_by_source[firstSource][0];
+                bestSource = firstSource;
+            }
+            
+            if (bestMatch) {
+                // Auto-select the best match
+                selectedBookMetadata = {
+                    author_name: bestMatch.author,
+                    name: bestMatch.title,
+                    title: bestMatch.title,
+                    series_name: bestMatch.series,
+                    series_position: bestMatch.series_position,
+                    year_published: bestMatch.year,
+                    source: bestSource
+                };
+                
+                // Fill in fields
+                if (bestMatch.author) {
+                    document.getElementById('edit-book-author').value = bestMatch.author;
+                }
+                if (bestMatch.title) {
+                    document.getElementById('edit-book-title').value = bestMatch.title;
+                }
+                if (bestMatch.series) {
+                    document.getElementById('edit-book-series').value = bestMatch.series;
+                }
+                if (bestMatch.series_position) {
+                    document.getElementById('edit-book-series-position').value = bestMatch.series_position;
+                }
+                
+                // Show success
+                const series = bestMatch.series ? ` (${bestMatch.series}${bestMatch.series_position ? ' #' + bestMatch.series_position : ''})` : '';
+                resultContent.innerHTML = `
+                    <div class="alert alert-success">
+                        <i class="bi bi-check-circle"></i> <strong>Quick Match Found!</strong><br>
+                        ${escapeHtml(bestMatch.author || 'Unknown')} - ${escapeHtml(bestMatch.title || 'Unknown')}${series}<br>
+                        <small class="text-muted">Source: ${bestSource} | Confidence: High</small>
+                    </div>
+                    <div class="mt-2">
+                        <button class="btn btn-sm btn-primary" onclick="switchToBookManualTab()">
+                            <i class="bi bi-pencil"></i> Review & Edit
+                        </button>
+                    </div>
+                `;
+                
+                // Show selected match
+                const matchDiv = document.getElementById('edit-selected-match');
+                const matchText = document.getElementById('edit-selected-match-text');
+                matchText.textContent = `${bestMatch.author || 'Unknown'} - ${bestMatch.title || 'Unknown'}${series} [${bestSource}]`;
+                matchDiv.classList.remove('d-none');
+                
+                // Switch to manual tab
+                setTimeout(() => {
+                    const manualTab = document.getElementById('book-manual-tab');
+                    if (manualTab) manualTab.click();
+                }, 500);
+            } else {
+                resultContent.innerHTML = '<div class="alert alert-warning">No suitable match found. Try manual search.</div>';
+            }
+        })
+        .catch(e => {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+            resultContent.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(e.toString())}</div>`;
+        });
+}
+
+function switchToBookManualTab() {
+    const manualTab = document.getElementById('book-manual-tab');
+    if (manualTab) {
+        manualTab.click();
+    }
 }
 
 function saveBookFix() {
