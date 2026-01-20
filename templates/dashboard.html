@@ -53,6 +53,22 @@
     </div>
 </div>
 
+<!-- Second Row: Additional Stats -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <a href="/history?status=error" class="text-decoration-none">
+            <div class="card stat-card h-100" title="Failed fixes that can be retried" style="cursor: pointer;">
+                <div class="card-body text-center">
+                    <i class="bi bi-exclamation-triangle text-warning" style="font-size: 2rem;"></i>
+                    <div class="stat-number" id="error-fixes">{{ error_fixes or 0 }}</div>
+                    <div class="text-muted">Failed Fixes</div>
+                    <small class="text-muted" style="font-size: 0.7rem;">can retry</small>
+                </div>
+            </div>
+        </a>
+    </div>
+</div>
+
 <!-- Floating Quick Actions Button -->
 <div class="position-fixed bottom-0 end-0 m-4" style="z-index: 1050;">
     <div class="dropup">
@@ -383,6 +399,10 @@ function refreshDashboard() {
             document.getElementById('queue-count').textContent = data.queue_size;
             document.getElementById('fixed-count').textContent = data.fixed;
             document.getElementById('pending-fixes').textContent = data.pending_fixes || 0;
+            const errorFixesEl = document.getElementById('error-fixes');
+            if (errorFixesEl) {
+                errorFixesEl.textContent = data.error_fixes || 0;
+            }
         })
         .catch(e => console.error('Stats refresh error:', e));
 

@@ -7,6 +7,8 @@
         <i class="bi bi-clock-history"></i>
         {% if status_filter == 'pending' %}
         Pending Fixes
+        {% elif status_filter == 'error' %}
+        Failed Fixes
         {% else %}
         Fix History
         {% endif %}
@@ -16,13 +18,17 @@
         <button id="bulk-apply-btn" class="btn btn-sm btn-success me-2" onclick="bulkApplyFixes()" disabled>
             <i class="bi bi-check-all"></i> Apply Selected (<span id="selected-count">0</span>)
         </button>
+        {% elif status_filter == 'error' %}
+        <button id="bulk-retry-btn" class="btn btn-sm btn-warning me-2" onclick="bulkRetryFixes()" disabled>
+            <i class="bi bi-arrow-clockwise"></i> Retry Selected (<span id="selected-count">0</span>)
+        </button>
         {% endif %}
         {% if status_filter %}
         <a href="/history" class="btn btn-sm btn-outline-secondary me-2">
             <i class="bi bi-x"></i> Clear Filter
         </a>
         {% endif %}
-        <span class="text-muted">{{ total }} {% if status_filter == 'pending' %}pending{% else %}total{% endif %}</span>
+        <span class="text-muted">{{ total }} {% if status_filter == 'pending' %}pending{% elif status_filter == 'error' %}errors{% else %}total{% endif %}</span>
     </div>
 </div>
 
@@ -36,7 +42,7 @@
         <table class="table table-sm mb-0 resizable-table" style="table-layout: auto;">
             <thead style="position: sticky; top: 0; background: rgba(22, 33, 62, 0.98); z-index: 10;">
                 <tr>
-                    {% if status_filter == 'pending' %}
+                    {% if status_filter == 'pending' or status_filter == 'error' %}
                     <th style="width: 40px;">
                         <input type="checkbox" id="select-all-checkbox" onchange="toggleSelectAll(this)" title="Select all">
                     </th>
@@ -52,7 +58,7 @@
             <tbody>
                 {% for h in history_items %}
                 <tr>
-                    {% if status_filter == 'pending' %}
+                    {% if status_filter == 'pending' or status_filter == 'error' %}
                     <td>
                         <input type="checkbox" class="fix-checkbox" value="{{ h.id }}" onchange="updateBulkApplyButton()">
                     </td>
@@ -100,6 +106,9 @@
                             <i class="bi bi-x"></i>
                         </button>
                         {% elif h.status == 'error' %}
+                        <button class="btn btn-sm btn-success" onclick="retryFix({{ h.id }})" title="Retry - try applying this fix again">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
                         <button class="btn btn-sm btn-outline-danger" onclick="dismissError({{ h.id }})" title="Dismiss - remove this entry">
                             <i class="bi bi-trash"></i>
                         </button>
@@ -209,6 +218,22 @@ function rejectFix(historyId) {
         .catch(e => showErrorWithHelp('Error: ' + e, 'api'));
 }
 
+function retryFix(historyId) {
+    if (!confirm('Retry applying this fix? This will attempt to rename the folder again.')) return;
+
+    fetch(`/api/apply_fix/${historyId}`, {method: 'POST'})
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                showSuccess('Fix retried and applied successfully!', 'Retry Successful');
+                setTimeout(() => location.reload(), 1500);
+            } else {
+                showErrorWithHelp(data.message || 'Retry failed: ' + (data.error || 'Unknown error'), 'file');
+            }
+        })
+        .catch(e => showErrorWithHelp('Error retrying fix: ' + e, 'api'));
+}
+
 function dismissError(historyId) {
     if (!confirm('Dismiss this error entry? It will be removed from history.')) return;
 
@@ -225,15 +250,23 @@ function dismissError(historyId) {
         .catch(e => showErrorWithHelp('Error: ' + e, 'api'));
 }
 
-// Bulk apply functionality
+// Bulk apply/retry functionality
 function updateBulkApplyButton() {
     const checkboxes = document.querySelectorAll('.fix-checkbox:checked');
     const count = checkboxes.length;
-    const btn = document.getElementById('bulk-apply-btn');
+    const applyBtn = document.getElementById('bulk-apply-btn');
+    const retryBtn = document.getElementById('bulk-retry-btn');
     const countSpan = document.getElementById('selected-count');
     
-    if (btn) {
-        btn.disabled = count === 0;
+    if (applyBtn) {
+        applyBtn.disabled = count === 0;
+        if (countSpan) {
+            countSpan.textContent = count;
+        }
+    }
+    
+    if (retryBtn) {
+        retryBtn.disabled = count === 0;
         if (countSpan) {
             countSpan.textContent = count;
         }
@@ -301,6 +334,56 @@ function bulkApplyFixes() {
             btn.disabled = false;
             btn.innerHTML = originalHtml;
             showErrorWithHelp('Failed to apply fixes: ' + e, 'api');
+        });
+}
+
+function bulkRetryFixes() {
+    const checkboxes = document.querySelectorAll('.fix-checkbox:checked');
+    const historyIds = Array.from(checkboxes).map(cb => parseInt(cb.value));
+    
+    if (historyIds.length === 0) {
+        showWarning('Please select at least one failed fix to retry.', 'No Selection');
+        return;
+    }
+    
+    if (!confirm(`Retry ${historyIds.length} selected failed fix(es)? This will attempt to apply them again.`)) {
+        return;
+    }
+    
+    const btn = document.getElementById('bulk-retry-btn');
+    const originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Retrying...';
+    
+    showInfo(`Retrying ${historyIds.length} fix(es)...`, 'Retrying Fixes');
+    
+    fetch('/api/apply_fixes_bulk', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({history_ids: historyIds})
+    })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                if (data.errors > 0) {
+                    showWarning(
+                        `Retried ${data.applied} fix(es), ${data.errors} still failed. Check history for details.`,
+                        'Bulk Retry Complete'
+                    );
+                } else {
+                    showSuccess(`Successfully retried and applied ${data.applied} fix(es)!`, 'Bulk Retry Complete');
+                }
+                setTimeout(() => location.reload(), 2000);
+            } else {
+                btn.disabled = false;
+                btn.innerHTML = originalHtml;
+                showErrorWithHelp(data.error || 'Failed to retry fixes', 'api');
+            }
+        })
+        .catch(e => {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+            showErrorWithHelp('Failed to retry fixes: ' + e, 'api');
         });
 }
 

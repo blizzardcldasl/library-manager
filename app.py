@@ -5215,6 +5215,9 @@ def dashboard():
     c.execute("SELECT COUNT(*) as count FROM history WHERE status = 'pending_fix'")
     pending_fixes = c.fetchone()['count']
 
+    c.execute("SELECT COUNT(*) as count FROM history WHERE status = 'error'")
+    error_fixes = c.fetchone()['count']
+
     # Get recent history
     c.execute('''SELECT h.*, b.path FROM history h
                  JOIN books b ON h.book_id = b.id
@@ -5236,6 +5239,7 @@ def dashboard():
                           fixed_count=fixed_count,
                           verified_count=verified_count,
                           pending_fixes=pending_fixes,
+                          error_fixes=error_fixes,
                           recent_history=recent_history,
                           daily_stats=daily_stats,
                           config=config,
@@ -5358,6 +5362,13 @@ def history_page():
         total = c.fetchone()['count']
         c.execute('''SELECT * FROM history
                      WHERE status = 'pending_fix'
+                     ORDER BY fixed_at DESC
+                     LIMIT ? OFFSET ?''', (per_page, offset))
+    elif status_filter == 'error':
+        c.execute("SELECT COUNT(*) as count FROM history WHERE status = 'error'")
+        total = c.fetchone()['count']
+        c.execute('''SELECT * FROM history
+                     WHERE status = 'error'
                      ORDER BY fixed_at DESC
                      LIMIT ? OFFSET ?''', (per_page, offset))
     else:
@@ -5942,18 +5953,19 @@ def api_apply_fixes_bulk():
     if not isinstance(history_ids, list):
         return jsonify({'success': False, 'error': 'history_ids must be an array'})
     
-    # Validate all IDs are pending fixes
+    # Validate all IDs are pending fixes or error status (for retry)
     conn = get_db()
     c = conn.cursor()
     placeholders = ','.join(['?'] * len(history_ids))
-    c.execute(f"SELECT id FROM history WHERE id IN ({placeholders}) AND status = 'pending_fix'", history_ids)
-    valid_ids = [row['id'] for row in c.fetchall()]
+    c.execute(f"SELECT id, status FROM history WHERE id IN ({placeholders}) AND status IN ('pending_fix', 'error')", history_ids)
+    valid_entries = c.fetchall()
+    valid_ids = [row['id'] for row in valid_entries]
     conn.close()
     
     if len(valid_ids) != len(history_ids):
         return jsonify({
             'success': False,
-            'error': f'Some IDs are invalid or not pending: {len(valid_ids)}/{len(history_ids)} valid'
+            'error': f'Some IDs are invalid or not pending/error status: {len(valid_ids)}/{len(history_ids)} valid'
         })
     
     applied = 0
@@ -6157,6 +6169,9 @@ def api_stats():
     c.execute("SELECT COUNT(*) as count FROM history WHERE status = 'pending_fix'")
     pending = c.fetchone()['count']
 
+    c.execute("SELECT COUNT(*) as count FROM history WHERE status = 'error'")
+    error_fixes = c.fetchone()['count']
+
     c.execute("SELECT COUNT(*) as count FROM books WHERE status = 'verified'")
     verified = c.fetchone()['count']
 
@@ -6170,6 +6185,7 @@ def api_stats():
         'queue_size': queue,
         'fixed': fixed,
         'pending_fixes': pending,
+        'error_fixes': error_fixes,
         'verified': verified,
         'structure_reversed': structure_reversed,
         'worker_running': is_worker_running(),
