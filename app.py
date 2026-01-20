@@ -5080,56 +5080,68 @@ def process_queue(config, limit=None):
                                 if existing_files:
                                     # Try to find a unique path by adding version distinguishers
                                     logger.info(f"CONFLICT: {new_path} exists, trying version-aware naming...")
-                            resolved_path = None
+                                    resolved_path = None
 
-                            # Try distinguishers in order: narrator, variant, edition, year
-                            # Only try if we have the data AND it's not already in the path
-                            distinguishers_to_try = []
+                                    # Try distinguishers in order: narrator, variant, edition, year
+                                    # Only try if we have the data AND it's not already in the path
+                                    distinguishers_to_try = []
 
-                            if new_narrator and new_narrator not in str(new_path):
-                                distinguishers_to_try.append(('narrator', new_narrator, None, None))
-                            if new_variant and new_variant not in str(new_path):
-                                distinguishers_to_try.append(('variant', None, None, new_variant))
-                            if new_edition and new_edition not in str(new_path):
-                                distinguishers_to_try.append(('edition', None, new_edition, None))
-                            if new_year and str(new_year) not in str(new_path):
-                                distinguishers_to_try.append(('year', None, None, None))
+                                    if new_narrator and new_narrator not in str(new_path):
+                                        distinguishers_to_try.append(('narrator', new_narrator, None, None))
+                                    if new_variant and new_variant not in str(new_path):
+                                        distinguishers_to_try.append(('variant', None, None, new_variant))
+                                    if new_edition and new_edition not in str(new_path):
+                                        distinguishers_to_try.append(('edition', None, new_edition, None))
+                                    if new_year and str(new_year) not in str(new_path):
+                                        distinguishers_to_try.append(('year', None, None, None))
 
-                            for dist_type, narrator_val, edition_val, variant_val in distinguishers_to_try:
-                                test_path = build_new_path(
-                                    lib_path, new_author, new_title,
-                                    series=new_series, series_num=new_series_num,
-                                    narrator=narrator_val or new_narrator,
-                                    audio_file_count=audio_file_count,
-                                    year=new_year if dist_type == 'year' else None,
-                                    edition=edition_val,
-                                    variant=variant_val,
-                                    config=config
-                                )
-                                if test_path and not test_path.exists():
-                                    resolved_path = test_path
-                                    logger.info(f"Resolved conflict using {dist_type}: {resolved_path}")
-                                    break
+                                    for dist_type, narrator_val, edition_val, variant_val in distinguishers_to_try:
+                                        test_path = build_new_path(
+                                            lib_path, new_author, new_title,
+                                            series=new_series, series_num=new_series_num,
+                                            narrator=narrator_val or new_narrator,
+                                            audio_file_count=audio_file_count,
+                                            year=new_year if dist_type == 'year' else None,
+                                            edition=edition_val,
+                                            variant=variant_val,
+                                            config=config
+                                        )
+                                        if test_path and not test_path.exists():
+                                            resolved_path = test_path
+                                            logger.info(f"Resolved conflict using {dist_type}: {resolved_path}")
+                                            break
 
-                            if resolved_path:
-                                new_path = resolved_path
-                            else:
-                                # Couldn't resolve - mark as conflict
-                                logger.warning(f"CONFLICT: {new_path} exists - no unique distinguisher found")
-                                c.execute('''INSERT INTO history (book_id, old_author, old_title, new_author, new_title, old_path, new_path, status, error_message)
-                                             VALUES (?, ?, ?, ?, ?, ?, ?, 'error', 'Destination exists - could not resolve version conflict')''',
-                                         (row['book_id'], row['current_author'], row['current_title'],
-                                          new_author, new_title, str(old_path), str(new_path)))
-                                c.execute('UPDATE books SET status = ?, error_message = ? WHERE id = ?',
-                                         ('conflict', 'Destination folder exists - multiple versions detected', row['book_id']))
-                                c.execute('DELETE FROM queue WHERE id = ?', (row['queue_id'],))
-                                processed += 1
-                                continue
-                        else:
-                            # Destination is empty folder - safe to use it
-                            shutil.move(str(old_path), str(new_path.parent / (new_path.name + "_temp")))
-                            new_path.rmdir()
-                            (new_path.parent / (new_path.name + "_temp")).rename(new_path)
+                                    if resolved_path:
+                                        new_path = resolved_path
+                                    else:
+                                        # Couldn't resolve - mark as conflict
+                                        logger.warning(f"CONFLICT: {new_path} exists - no unique distinguisher found")
+                                        c.execute('''INSERT INTO history (book_id, old_author, old_title, new_author, new_title, old_path, new_path, status, error_message)
+                                                     VALUES (?, ?, ?, ?, ?, ?, ?, 'error', 'Destination exists - could not resolve version conflict')''',
+                                                 (row['book_id'], row['current_author'], row['current_title'],
+                                                  new_author, new_title, str(old_path), str(new_path)))
+                                        c.execute('UPDATE books SET status = ?, error_message = ? WHERE id = ?',
+                                                 ('conflict', 'Destination folder exists - multiple versions detected', row['book_id']))
+                                        c.execute('DELETE FROM queue WHERE id = ?', (row['queue_id'],))
+                                        processed += 1
+                                        continue
+                                else:
+                                    # Destination is empty folder - safe to use it
+                                    shutil.move(str(old_path), str(new_path.parent / (new_path.name + "_temp")))
+                                    new_path.rmdir()
+                                    (new_path.parent / (new_path.name + "_temp")).rename(new_path)
+                        except OSError as e:
+                            logger.error(f"Error checking destination path {new_path}: {e}")
+                            # Treat as conflict if we can't check
+                            c.execute('''INSERT INTO history (book_id, old_author, old_title, new_author, new_title, old_path, new_path, status, error_message)
+                                         VALUES (?, ?, ?, ?, ?, ?, ?, 'error', 'Error checking destination path')''',
+                                     (row['book_id'], row['current_author'], row['current_title'],
+                                      new_author, new_title, str(old_path), str(new_path)))
+                            c.execute('UPDATE books SET status = ?, error_message = ? WHERE id = ?',
+                                     ('error', f'Error checking destination: {str(e)}', row['book_id']))
+                            c.execute('DELETE FROM queue WHERE id = ?', (row['queue_id'],))
+                            processed += 1
+                            continue
 
                         # Clean up empty parent author folder
                         try:
