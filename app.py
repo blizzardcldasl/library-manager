@@ -4039,6 +4039,102 @@ def calculate_name_similarity(name1, name2):
     return intersection / union if union > 0 else 0.0
 
 
+def check_files_should_move_to_existing_folder(old_path, new_author, new_title, lib_path, config):
+    """
+    Check if files in old_path should be moved to an existing folder based on file metadata.
+    This handles the case where files are in the wrong folder but the correct folder already exists.
+    
+    Returns: (should_move: bool, destination_path: Path or None, file_metadata: dict or None)
+    """
+    if not old_path.exists() or not old_path.is_dir():
+        return False, None, None
+    
+    # Check if this is a file-folder mismatch case by examining file metadata
+    try:
+        audio_files = find_audio_files(str(old_path))
+        if not audio_files or len(audio_files) < 1:
+            return False, None, None
+        
+        # Sample a few files to check their metadata
+        sample_files = audio_files[:3]
+        file_authors = []
+        file_titles = []
+        
+        for audio_file in sample_files:
+            metadata = read_audio_metadata(str(audio_file))
+            if metadata:
+                author_from_file = metadata.get('albumartist') or metadata.get('artist')
+                title_from_file = metadata.get('album')
+                
+                if author_from_file:
+                    file_authors.append(author_from_file)
+                if title_from_file:
+                    file_titles.append(title_from_file)
+        
+        # If we have file metadata, check if it matches the new_author/new_title
+        # and if a folder with that structure already exists
+        if file_authors and file_titles:
+            # Get most common author/title from files
+            from collections import Counter
+            most_common_author = Counter(file_authors).most_common(1)[0][0] if file_authors else None
+            most_common_title = Counter(file_titles).most_common(1)[0][0] if file_titles else None
+            
+            # Check if file metadata matches the new_author/new_title (what we want to move to)
+            author_similarity = calculate_name_similarity(most_common_author, new_author) if most_common_author and new_author else 0.0
+            title_similarity = calculate_name_similarity(most_common_title, new_title) if most_common_title and new_title else 0.0
+            
+            # If file metadata matches the target (high similarity), check if destination exists
+            if author_similarity >= 0.7 and title_similarity >= 0.6:
+                # Build the path we want to move to
+                potential_dest = build_new_path(
+                    lib_path, new_author, new_title,
+                    config=config
+                )
+                
+                if potential_dest and potential_dest.exists() and potential_dest != old_path:
+                    # Check if destination has actual content (not just metadata)
+                    try:
+                        with os.scandir(str(potential_dest)) as entries:
+                            existing_items = list(entries)
+                        
+                        # Filter out metadata files to check if it has real content
+                        all_files = [f for f in potential_dest.rglob('*') if f.is_file()]
+                        audio_files_dest = [f for f in all_files if f.suffix.lower() in AUDIO_EXTENSIONS]
+                        ebook_files_dest = [f for f in all_files if f.suffix.lower() in EBOOK_EXTENSIONS]
+                        
+                        # Check for content files (excluding metadata)
+                        content_files = []
+                        ebook_management_enabled = config.get('ebook_management', False)
+                        for f in all_files:
+                            is_metadata = (
+                                f.suffix.lower() in METADATA_EXTENSIONS or
+                                f.name.lower() in METADATA_FILENAMES or
+                                f.name.lower().endswith('.nfo')
+                            )
+                            is_ebook = f.suffix.lower() in EBOOK_EXTENSIONS
+                            
+                            if is_ebook and not ebook_management_enabled:
+                                content_files.append(f)
+                            elif not is_metadata and not is_ebook:
+                                content_files.append(f)
+                        
+                        # If destination has audio files or content, it's a valid merge target
+                        if audio_files_dest or (content_files and not ebook_management_enabled):
+                            return True, potential_dest, {
+                                'file_author': most_common_author,
+                                'file_title': most_common_title,
+                                'author_similarity': author_similarity,
+                                'title_similarity': title_similarity
+                            }
+                    except (OSError, PermissionError):
+                        pass
+    
+    except Exception as e:
+        logger.debug(f"Error checking if files should move: {e}")
+    
+    return False, None, None
+
+
 def scan_folder_recursive(folder_path, library_root, config, conn, c, 
                           author_context=None, series_context=None, depth=0, max_depth=5):
     """
@@ -4942,6 +5038,123 @@ def process_queue(config, limit=None):
                 lib_path = old_path.parent.parent
                 logger.warning(f"Book path {old_path} not under any configured library, guessing lib_path={lib_path}")
 
+            # Check if this is a file-folder mismatch case where files should be moved to existing folder
+            should_move_files, existing_dest_path, file_metadata = check_files_should_move_to_existing_folder(
+                old_path, new_author, new_title, lib_path, config
+            )
+            
+            if should_move_files and existing_dest_path:
+                # Files are in wrong folder, but correct destination folder exists
+                # Move files to existing folder instead of renaming
+                logger.info(f"File-folder mismatch detected: files in {old_path} belong in existing folder {existing_dest_path}")
+                logger.info(f"File metadata: author={file_metadata.get('file_author')}, title={file_metadata.get('file_title')}")
+                
+                # Only auto-fix if enabled
+                if config.get('auto_fix', False):
+                    try:
+                        import shutil
+                        
+                        # Move all files from old_path to existing_dest_path
+                        moved_count = 0
+                        errors = []
+                        
+                        if old_path.exists() and old_path.is_dir():
+                            # Get all files (audio, ebooks, metadata, etc.)
+                            all_files = [f for f in old_path.rglob('*') if f.is_file()]
+                            
+                            for file_path in all_files:
+                                try:
+                                    # Calculate relative path from old_path to preserve structure
+                                    rel_path = file_path.relative_to(old_path)
+                                    dest_file = existing_dest_path / rel_path
+                                    
+                                    # Create parent directories if needed
+                                    dest_file.parent.mkdir(parents=True, exist_ok=True)
+                                    
+                                    # Move file
+                                    if dest_file.exists():
+                                        # File already exists at destination - skip or handle conflict
+                                        logger.warning(f"File already exists at destination: {dest_file}, skipping {file_path}")
+                                        continue
+                                    
+                                    shutil.move(str(file_path), str(dest_file))
+                                    moved_count += 1
+                                except Exception as e:
+                                    errors.append(f"{file_path}: {e}")
+                                    logger.error(f"Error moving file {file_path}: {e}")
+                            
+                            # After moving files, try to remove empty directories
+                            try:
+                                # Remove old_path if it's now empty (only metadata files left)
+                                remaining = list(old_path.rglob('*'))
+                                remaining_files = [f for f in remaining if f.is_file()]
+                                
+                                # Check if only metadata files remain
+                                only_metadata = True
+                                for f in remaining_files:
+                                    is_metadata = (
+                                        f.suffix.lower() in METADATA_EXTENSIONS or
+                                        f.name.lower() in METADATA_FILENAMES or
+                                        f.name.lower().endswith('.nfo')
+                                    )
+                                    if not is_metadata:
+                                        only_metadata = False
+                                        break
+                                
+                                if only_metadata or len(remaining_files) == 0:
+                                    # Remove old folder structure
+                                    try:
+                                        shutil.rmtree(str(old_path))
+                                        logger.info(f"Removed empty source folder: {old_path}")
+                                    except Exception as e:
+                                        logger.warning(f"Could not remove empty folder {old_path}: {e}")
+                            except Exception as e:
+                                logger.debug(f"Error checking/removing old folder: {e}")
+                            
+                            if errors:
+                                logger.warning(f"Moved {moved_count} files with {len(errors)} errors: {errors[0]}")
+                            else:
+                                logger.info(f"Successfully moved {moved_count} files from {old_path} to {existing_dest_path}")
+                            
+                            # Update database to point to new location
+                            new_path = existing_dest_path
+                            
+                            # Record in history
+                            c.execute('''INSERT INTO history (book_id, old_author, old_title, new_author, new_title, old_path, new_path, status)
+                                         VALUES (?, ?, ?, ?, ?, ?, ?, 'fixed')''',
+                                     (row['book_id'], row['current_author'], row['current_title'],
+                                      new_author, new_title, str(old_path), str(new_path)))
+                            
+                            # Update book record
+                            c.execute('UPDATE books SET path = ?, current_author = ?, current_title = ?, status = ? WHERE id = ?',
+                                     (str(new_path), new_author, new_title, 'fixed', row['book_id']))
+                            
+                            # Remove from queue
+                            c.execute('DELETE FROM queue WHERE id = ?', (row['queue_id'],))
+                            
+                            conn.commit()
+                            processed += 1
+                            fixed += 1
+                            logger.info(f"Fixed (moved files): {row['current_author']}/{row['current_title']} -> {new_author}/{new_title}")
+                            continue
+                        else:
+                            logger.warning(f"Cannot move files: source path {old_path} does not exist or is not a directory")
+                    except Exception as e:
+                        logger.error(f"Error moving files to existing folder: {e}", exc_info=True)
+                        # Fall through to normal processing
+                else:
+                    # Auto-fix disabled - create pending fix
+                    logger.info(f"File-folder mismatch detected but auto-fix disabled, creating pending fix")
+                    c.execute('''INSERT INTO history (book_id, old_author, old_title, new_author, new_title, old_path, new_path, status, error_message)
+                                 VALUES (?, ?, ?, ?, ?, ?, ?, 'pending_fix', ?)''',
+                             (row['book_id'], row['current_author'], row['current_title'],
+                              new_author, new_title, str(old_path), str(existing_dest_path),
+                              f"Files should be moved to existing folder (file metadata: {file_metadata.get('file_author')}/{file_metadata.get('file_title')})"))
+                    c.execute('UPDATE books SET status = ? WHERE id = ?', ('pending_fix', row['book_id']))
+                    c.execute('DELETE FROM queue WHERE id = ?', (row['queue_id'],))
+                    processed += 1
+                    continue
+
             # Count audio files for multi-part book detection (Readarr format)
             audio_file_count = None
             if old_path.exists() and old_path.is_dir():
@@ -5073,12 +5286,31 @@ def process_queue(config, limit=None):
                     import shutil
 
                     if new_path.exists():
-                        # Destination already exists - check if it has files
+                        # Destination already exists - check if it has actual content (not just metadata)
                         try:
-                            with os.scandir(str(new_path)) as entries:
-                                existing_files = list(entries)
+                            # Check for actual content files (audio, ebooks, etc.) excluding metadata
+                            all_files_dest = [f for f in new_path.rglob('*') if f.is_file()]
+                            audio_files_dest = [f for f in all_files_dest if f.suffix.lower() in AUDIO_EXTENSIONS]
+                            ebook_files_dest = [f for f in all_files_dest if f.suffix.lower() in EBOOK_EXTENSIONS]
                             
-                            if existing_files:
+                            # Check for content files (excluding metadata)
+                            content_files_dest = []
+                            ebook_management_enabled = config.get('ebook_management', False)
+                            for f in all_files_dest:
+                                is_metadata = (
+                                    f.suffix.lower() in METADATA_EXTENSIONS or
+                                    f.name.lower() in METADATA_FILENAMES or
+                                    f.name.lower().endswith('.nfo')
+                                )
+                                is_ebook = f.suffix.lower() in EBOOK_EXTENSIONS
+                                
+                                if is_ebook and not ebook_management_enabled:
+                                    content_files_dest.append(f)
+                                elif not is_metadata and not is_ebook:
+                                    content_files_dest.append(f)
+                            
+                            # Destination has actual content (audio files or non-metadata content)
+                            if audio_files_dest or (content_files_dest and not ebook_management_enabled):
                                 # Try to find a unique path by adding version distinguishers
                                 logger.info(f"CONFLICT: {new_path} exists, trying version-aware naming...")
                                 resolved_path = None
@@ -5127,7 +5359,8 @@ def process_queue(config, limit=None):
                                     processed += 1
                                     continue
                             else:
-                                # Destination is empty folder - safe to use it
+                                # Destination is empty folder (only metadata files) - safe to use it
+                                # Remove empty destination and rename source folder
                                 shutil.move(str(old_path), str(new_path.parent / (new_path.name + "_temp")))
                                 new_path.rmdir()
                                 (new_path.parent / (new_path.name + "_temp")).rename(new_path)
