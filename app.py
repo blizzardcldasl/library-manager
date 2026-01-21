@@ -2641,6 +2641,166 @@ def find_orphan_audio_files(lib_path):
     return orphans
 
 
+def safe_move_folder(old_path, new_path, config, conn=None, book_id=None):
+    """
+    Safely move a folder using create-move-delete pattern.
+    
+    This function handles:
+    - Series folder creation (only creates parent folders, never touches existing books)
+    - Atomic operations with temp paths
+    - Conflict resolution
+    - Empty folder cleanup
+    - Error recovery
+    
+    CRITICAL: Only moves the specific book folder (old_path), never series folders
+    or other books in the series. When moving book 8 to a series with books 1-7,
+    books 1-7 remain completely untouched.
+    
+    Args:
+        old_path: Path object - source folder (specific book folder only)
+        new_path: Path object - destination folder
+        config: dict - configuration
+        conn: sqlite3.Connection - database connection (optional, for logging)
+        book_id: int - book ID (optional, for logging)
+    
+    Returns:
+        tuple: (success: bool, message: str, rollback_path: Path or None)
+    """
+    import shutil
+    
+    # Pre-flight validation
+    if not old_path.exists():
+        return False, f"Source does not exist: {old_path}", None
+    
+    if not old_path.is_dir():
+        return False, f"Source is not a directory: {old_path}", None
+    
+    # Validate destination path - check if source and destination are the same
+    try:
+        if new_path.exists() and new_path.samefile(old_path):
+            return False, "Source and destination are the same", None
+    except (OSError, ValueError):
+        pass  # Paths might not be comparable, continue
+    
+    # Validate paths are within library boundaries
+    library_paths = [Path(p).resolve() for p in config.get('library_paths', [])]
+    old_in_library = False
+    new_in_library = False
+    
+    for lib_path in library_paths:
+        try:
+            old_path.resolve().relative_to(lib_path)
+            old_in_library = True
+        except ValueError:
+            pass
+        
+        try:
+            new_path.resolve().relative_to(lib_path)
+            new_in_library = True
+        except ValueError:
+            pass
+    
+    if not old_in_library or not new_in_library:
+        return False, f"Path outside library boundaries: old_in_lib={old_in_library}, new_in_lib={new_in_library}", None
+    
+    # Check destination depth (safety check)
+    for lib_path in library_paths:
+        try:
+            relative = new_path.resolve().relative_to(lib_path)
+            if len(relative.parts) < 2:
+                return False, f"Destination path too shallow ({len(relative.parts)} levels)", None
+            break
+        except ValueError:
+            continue
+    
+    # Handle existing destination
+    if new_path.exists():
+        # Check if destination has content
+        try:
+            with os.scandir(str(new_path)) as entries:
+                existing_files = list(entries)
+            
+            if existing_files:
+                # Destination has files - check if it's safe to merge
+                # For now, we don't merge - treat as conflict
+                return False, f"Destination exists with {len(existing_files)} items", None
+            else:
+                # Empty folder - remove it first (safe to use)
+                try:
+                    new_path.rmdir()
+                except OSError as e:
+                    return False, f"Cannot remove empty destination folder: {e}", None
+        except (OSError, PermissionError) as e:
+            return False, f"Cannot access destination folder: {e}", None
+    
+    # Create destination structure (parent folders only)
+    # CRITICAL: This only creates parent folders (Author/Series/), never touches existing books
+    # exist_ok=True means if series folder already exists with books 1-7, do nothing
+    try:
+        new_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        return False, f"Cannot create destination structure: {e}", None
+    
+    # Verify structure created
+    if not new_path.parent.exists():
+        return False, "Failed to create destination structure", None
+    
+    # Atomic move operation using temp path
+    # CRITICAL: Only old_path (the specific book folder) is moved, never series folders
+    temp_path = new_path.parent / (new_path.name + ".tmp")
+    
+    try:
+        # Move ONLY the specific book folder to temp path
+        shutil.move(str(old_path), str(temp_path))
+        
+        # Atomic rename temp -> final
+        temp_path.rename(new_path)
+        
+        # Success - clean up empty parent folders from old location
+        cleanup_success = True
+        try:
+            # Find library root for cleanup boundary
+            library_root = None
+            for lib_path in library_paths:
+                try:
+                    old_path.resolve().relative_to(lib_path)
+                    library_root = lib_path
+                    break
+                except ValueError:
+                    continue
+            
+            if library_root:
+                # Clean up empty parent folders (but stop at library root)
+                parent = old_path.parent
+                while parent != library_root and parent.exists():
+                    try:
+                        if not any(parent.iterdir()):
+                            parent.rmdir()
+                            parent = parent.parent
+                        else:
+                            break  # Parent has other content, stop cleanup
+                    except OSError:
+                        break  # Can't remove, stop cleanup
+        except Exception as e:
+            logger.warning(f"Cleanup of empty folders failed (non-critical): {e}")
+            cleanup_success = False
+        
+        return True, "Move completed successfully", None
+        
+    except Exception as e:
+        # Rollback: move temp back to source if it exists
+        rollback_path = None
+        if temp_path.exists():
+            try:
+                shutil.move(str(temp_path), str(old_path))
+                rollback_path = None  # Successfully rolled back
+            except Exception as rollback_error:
+                rollback_path = temp_path  # Rollback failed, temp path still exists
+                logger.error(f"Rollback failed: {rollback_error}")
+        
+        return False, f"Move failed: {e}", rollback_path
+
+
 def organize_orphan_files(author_path, book_title, files, config=None):
     """Create a book folder and move orphan files into it."""
     import shutil
@@ -5540,10 +5700,25 @@ def process_queue(config, limit=None):
                                     continue
                             else:
                                 # Destination is empty folder (only metadata files) - safe to use it
-                                # Remove empty destination and rename source folder
-                                shutil.move(str(old_path), str(new_path.parent / (new_path.name + "_temp")))
-                                new_path.rmdir()
-                                (new_path.parent / (new_path.name + "_temp")).rename(new_path)
+                                # Use safe_move_folder for consistent handling
+                                success, message, rollback_path = safe_move_folder(old_path, new_path, config, conn, row['book_id'])
+                                
+                                if not success:
+                                    # Move failed - record error
+                                    error_msg = f"Move failed: {message}"
+                                    if rollback_path:
+                                        error_msg += f" (rollback path: {rollback_path})"
+                                    logger.error(error_msg)
+                                    c.execute('''INSERT INTO history (book_id, old_author, old_title, new_author, new_title, old_path, new_path, status, error_message)
+                                                 VALUES (?, ?, ?, ?, ?, ?, ?, 'error', ?)''',
+                                             (row['book_id'], row['current_author'], row['current_title'],
+                                              new_author, new_title, str(old_path), str(new_path), error_msg))
+                                    c.execute('UPDATE books SET status = ?, error_message = ? WHERE id = ?',
+                                             ('error', error_msg, row['book_id']))
+                                    c.execute('DELETE FROM queue WHERE id = ?', (row['queue_id'],))
+                                    conn.commit()
+                                    processed += 1
+                                    continue
                         except OSError as e:
                             logger.error(f"Error checking destination path {new_path}: {e}")
                             # Treat as conflict if we can't check
@@ -5557,24 +5732,26 @@ def process_queue(config, limit=None):
                             processed += 1
                             continue
 
-                        # Clean up empty parent author folder
-                        try:
-                            if old_path.parent.exists() and not any(old_path.parent.iterdir()):
-                                old_path.parent.rmdir()
-                        except OSError:
-                            pass  # Parent not empty, that's fine
-
                     if not new_path.exists():
-                        # Destination doesn't exist - simple rename
-                        new_path.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.move(str(old_path), str(new_path))
-
-                        # Clean up empty parent author folder
-                        try:
-                            if old_path.parent.exists() and not any(old_path.parent.iterdir()):
-                                old_path.parent.rmdir()
-                        except OSError:
-                            pass  # Parent not empty, that's fine
+                        # Use safe_move_folder for consistent, safe moving
+                        success, message, rollback_path = safe_move_folder(old_path, new_path, config, conn, row['book_id'])
+                        
+                        if not success:
+                            # Move failed - record error
+                            error_msg = f"Move failed: {message}"
+                            if rollback_path:
+                                error_msg += f" (rollback path: {rollback_path})"
+                            logger.error(error_msg)
+                            c.execute('''INSERT INTO history (book_id, old_author, old_title, new_author, new_title, old_path, new_path, status, error_message)
+                                         VALUES (?, ?, ?, ?, ?, ?, ?, 'error', ?)''',
+                                     (row['book_id'], row['current_author'], row['current_title'],
+                                      new_author, new_title, str(old_path), str(new_path), error_msg))
+                            c.execute('UPDATE books SET status = ?, error_message = ? WHERE id = ?',
+                                     ('error', error_msg, row['book_id']))
+                            c.execute('DELETE FROM queue WHERE id = ?', (row['queue_id'],))
+                            conn.commit()
+                            processed += 1
+                            continue
 
                     logger.info(f"Fixed: {row['current_author']}/{row['current_title']} -> {new_author}/{new_title}")
 
@@ -5734,20 +5911,33 @@ def apply_fix(history_id):
                 except (OSError, PermissionError):
                     pass
                 # Destination is empty folder - safe to use it
-                    shutil.move(str(old_path), str(new_path.parent / (new_path.name + "_temp")))
-                    new_path.rmdir()
-                    (new_path.parent / (new_path.name + "_temp")).rename(new_path)
+                # Use safe_move_folder for consistent handling
+                success, message, rollback_path = safe_move_folder(old_path, new_path, config, conn, fix['book_id'])
+                
+                if not success:
+                    error_msg = f"Move failed: {message}"
+                    if rollback_path:
+                        error_msg += f" (rollback path: {rollback_path})"
+                    c.execute('UPDATE history SET status = ?, error_message = ? WHERE id = ?',
+                             ('error', error_msg, history_id))
+                    conn.commit()
+                    conn.close()
+                    return False, error_msg
         else:
-            # Destination doesn't exist - create parent folders and move
-            new_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(old_path), str(new_path))
+            # Destination doesn't exist - use safe_move_folder
+            success, message, rollback_path = safe_move_folder(old_path, new_path, config, conn, fix['book_id'])
+            
+            if not success:
+                error_msg = f"Move failed: {message}"
+                if rollback_path:
+                    error_msg += f" (rollback path: {rollback_path})"
+                c.execute('UPDATE history SET status = ?, error_message = ? WHERE id = ?',
+                         ('error', error_msg, history_id))
+                conn.commit()
+                conn.close()
+                return False, error_msg
 
-        # Clean up empty parent
-        try:
-            if old_path.parent.exists() and not any(old_path.parent.iterdir()):
-                old_path.parent.rmdir()
-        except OSError:
-            pass
+        # Cleanup is handled by safe_move_folder, no need to do it again here
 
         # Update book record
         c.execute('''UPDATE books SET path = ?, current_author = ?, current_title = ?, status = ?
