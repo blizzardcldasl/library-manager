@@ -6018,8 +6018,13 @@ def books_page():
         params.extend([search_param, search_param, search_param])
     
     if status_filter:
-        where_clauses.append("status = ?")
-        params.append(status_filter)
+        if status_filter == 'error':
+            # Include books with status='error' OR books with error_message (more comprehensive)
+            where_clauses.append("(status = ? OR error_message IS NOT NULL)")
+            params.append(status_filter)
+        else:
+            where_clauses.append("status = ?")
+            params.append(status_filter)
     
     where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
     
@@ -6044,6 +6049,13 @@ def books_page():
                  FROM books 
                  GROUP BY status''')
     status_counts = {row['status']: row['count'] for row in c.fetchall()}
+    
+    # For 'error' count, also include books with error_message even if status != 'error'
+    c.execute('''SELECT COUNT(*) as count 
+                 FROM books 
+                 WHERE status = 'error' OR error_message IS NOT NULL''')
+    error_count = c.fetchone()['count']
+    status_counts['error'] = error_count
     
     conn.close()
     
