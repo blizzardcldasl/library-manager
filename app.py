@@ -203,6 +203,15 @@ def extract_series_from_title(title):
         series = match.group(1).strip()
         return series, int(match.group(2)), series
 
+    # Pattern: "Title (Series Name #N)" - series name and number in parentheses at end
+    # e.g., "Dance to the Piper (The O'Hurleys #2)" -> extract series and number
+    match = re.search(r'^(.+?)\s*\((.+?)\s*#(\d+)\)\s*$', normalized)
+    if match:
+        title_clean = match.group(1).strip()
+        series_name = match.group(2).strip()
+        series_num = int(match.group(3))
+        return series_name, series_num, title_clean
+
     # Pattern: "Title (Book N)" - book number in parentheses at end
     # e.g., "Ivypool's Heart (Book 17)" -> extract number, title stays same
     match = re.search(r'^(.+?)\s*\(Book\s+(\d+)\)\s*$', normalized, re.IGNORECASE)
@@ -9049,6 +9058,20 @@ def api_manual_match():
         series_num = bookdb_result.get('series_position') or bookdb_result.get('series_num')
         narrator = bookdb_result.get('narrator')
         year = bookdb_result.get('year') or bookdb_result.get('year_published')
+    
+    # If series info not found in metadata, try to extract from original title
+    # This handles cases like "Dance to the Piper (The O'Hurleys #2)"
+    if not series_name or not series_num:
+        extracted_series, extracted_num, extracted_title = extract_series_from_title(old_title)
+        if extracted_series and extracted_num:
+            if not series_name:
+                series_name = extracted_series
+            if not series_num:
+                series_num = extracted_num
+            # If we extracted a cleaner title and user didn't provide a new title, use it
+            if extracted_title != old_title and not new_title:
+                new_title = extracted_title
+            logger.info(f"Extracted series from original title: '{series_name}' #{series_num}")
 
     if not new_author or not new_title:
         conn.close()
