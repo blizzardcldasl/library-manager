@@ -266,6 +266,27 @@
     </style>
 </head>
 <body>
+    <!-- Global Processing Status Banner (visible on all pages) -->
+    <div id="global-processing-banner" class="alert alert-info d-none mb-0" style="border-radius: 0; margin-bottom: 0 !important;">
+        <div class="container">
+            <div class="d-flex align-items-center justify-content-between">
+                <div class="d-flex align-items-center">
+                    <div class="spinner-border spinner-border-sm me-3" role="status"></div>
+                    <div>
+                        <strong>Processing Queue...</strong>
+                        <span id="global-processing-status">Starting...</span>
+                    </div>
+                </div>
+                <a href="/queue" class="btn btn-sm btn-outline-light">
+                    <i class="bi bi-arrow-right"></i> View Queue
+                </a>
+            </div>
+            <div class="progress mt-2" style="height: 20px;">
+                <div class="progress-bar progress-bar-striped progress-bar-animated" id="global-processing-progress" style="width: 0%">0%</div>
+            </div>
+        </div>
+    </div>
+
     <nav class="navbar navbar-expand-lg navbar-dark mb-4">
         <div class="container">
             <a class="navbar-brand" href="/">
@@ -803,6 +824,49 @@
             tooltipTriggerList.map(function (tooltipTriggerEl) {
                 return new bootstrap.Tooltip(tooltipTriggerEl);
             });
+            
+            // Start polling for global processing status on all pages
+            startGlobalProcessingPoll();
+        });
+        
+        // Global processing status polling (works on all pages)
+        let globalProcessingInterval = null;
+        
+        function startGlobalProcessingPoll() {
+            // Poll every 3 seconds
+            globalProcessingInterval = setInterval(checkGlobalProcessingStatus, 3000);
+            // Check immediately
+            checkGlobalProcessingStatus();
+        }
+        
+        function checkGlobalProcessingStatus() {
+            fetch('/api/process_status')
+                .then(r => r.json())
+                .then(status => {
+                    const banner = document.getElementById('global-processing-banner');
+                    const progressBar = document.getElementById('global-processing-progress');
+                    const statusText = document.getElementById('global-processing-status');
+                    
+                    if (status.active) {
+                        banner.classList.remove('d-none');
+                        const pct = status.total > 0 ? Math.round((status.processed / status.total) * 100) : 0;
+                        progressBar.style.width = pct + '%';
+                        progressBar.textContent = `${status.processed}/${status.total} (${pct}%)`;
+                        statusText.textContent = `${status.current || `Processed ${status.processed} of ${status.total} items`}`;
+                    } else {
+                        banner.classList.add('d-none');
+                    }
+                })
+                .catch(e => {
+                    // Silently fail - don't spam console
+                });
+        }
+        
+        // Clean up on page unload
+        window.addEventListener('beforeunload', function() {
+            if (globalProcessingInterval) {
+                clearInterval(globalProcessingInterval);
+            }
         });
     </script>
     {% block scripts %}{% endblock %}

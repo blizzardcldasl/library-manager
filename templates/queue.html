@@ -690,13 +690,18 @@ function processAll() {
     })
     .then(r => r.json())
     .then(data => {
-        log(`Process All complete: ${data.processed} processed, ${data.fixed} fixed`);
-        isProcessing = false;
-        showProcessingBanner(false);
-        clearInterval(pollInterval);
-        document.getElementById('process-all-btn').disabled = false;
-        document.getElementById('process-one-btn').disabled = false;
-        refreshQueue();
+        if (data.success) {
+            log(`Process All started in background: ${data.message || ''}`);
+            // Don't clear interval or hide banner - let pollStatus handle completion
+            // The polling will continue and detect when processing is done
+        } else {
+            log(`Error: ${data.error || 'Unknown error'}`);
+            isProcessing = false;
+            showProcessingBanner(false);
+            clearInterval(pollInterval);
+            document.getElementById('process-all-btn').disabled = false;
+            document.getElementById('process-one-btn').disabled = false;
+        }
     })
     .catch(e => {
         log('ERROR: ' + e);
@@ -725,14 +730,36 @@ function processOne() {
 }
 
 function pollStatus() {
-    fetch('/api/stats')
+    fetch('/api/process_status')
         .then(r => r.json())
-        .then(data => {
-            if (data.processing && data.processing.active) {
-                updateProgress(data.processing.processed, data.processing.total);
-                log(`Status: ${data.processing.processed}/${data.processing.total} processed`);
+        .then(status => {
+            if (status.active) {
+                updateProgress(status.processed, status.total);
+                log(`Status: ${status.processed}/${status.total} processed - ${status.current}`);
+                showProcessingBanner(true);
+            } else {
+                // Processing complete
+                if (isProcessing) {
+                    isProcessing = false;
+                    showProcessingBanner(false);
+                    clearInterval(pollInterval);
+                    document.getElementById('process-all-btn').disabled = false;
+                    document.getElementById('process-one-btn').disabled = false;
+                    refreshQueue();
+                }
             }
-            document.getElementById('queue-badge').textContent = data.queue_size;
+        })
+        .catch(e => {
+            // If status endpoint fails, try stats endpoint as fallback
+            fetch('/api/stats')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.processing && data.processing.active) {
+                        updateProgress(data.processing.processed, data.processing.total);
+                        log(`Status: ${data.processing.processed}/${data.processing.total} processed`);
+                    }
+                    document.getElementById('queue-badge').textContent = data.queue_size;
+                });
         });
 }
 

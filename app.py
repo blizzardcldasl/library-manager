@@ -6598,12 +6598,27 @@ def api_process():
     logger.info(f"API process called: all={process_all}, limit={limit}")
 
     if process_all:
-        # Process entire queue in batches
-        processed, fixed = process_all_queue(config)
+        # Check if already processing
+        if processing_status.get('active', False):
+            return jsonify({'success': False, 'error': 'Processing already in progress'})
+        
+        # Start processing in background thread so it continues even if user navigates away
+        def run_process_all():
+            try:
+                process_all_queue(config)
+            except Exception as e:
+                logger.error(f"Error in background process_all: {e}", exc_info=True)
+                processing_status["active"] = False
+                processing_status["errors"].append(f"Fatal error: {str(e)}")
+        
+        thread = threading.Thread(target=run_process_all, daemon=True)
+        thread.start()
+        
+        # Return immediately - processing continues in background
+        return jsonify({'success': True, 'message': 'Processing started in background'})
     else:
         processed, fixed = process_queue(config, limit)
-
-    return jsonify({'success': True, 'processed': processed, 'fixed': fixed})
+        return jsonify({'success': True, 'processed': processed, 'fixed': fixed})
 
 @app.route('/api/process_status')
 def api_process_status():
