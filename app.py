@@ -9018,17 +9018,22 @@ def api_manual_match():
     conn = get_db()
     c = conn.cursor()
 
-    # Get the queue item
-    c.execute('SELECT * FROM queue WHERE id = ?', (queue_id,))
+    # Get the queue item with book information (join with books table to get path)
+    c.execute('''SELECT q.id, q.reason, q.added_at, q.book_id,
+                        b.path, b.current_author, b.current_title, b.status
+                 FROM queue q
+                 JOIN books b ON q.book_id = b.id
+                 WHERE q.id = ?''', (queue_id,))
     item = c.fetchone()
     if not item:
         conn.close()
         return jsonify({'success': False, 'error': 'Queue item not found'})
 
     item = dict(item)
-    old_path = item['folder_path']
+    old_path = item['path']  # Path comes from books table
     old_author = item['current_author']
     old_title = item['current_title']
+    book_id = item['book_id']
 
     # Determine new values
     if bookdb_result:
@@ -9069,10 +9074,9 @@ def api_manual_match():
 
     # Record as pending fix (don't rename immediately - user can review)
     c.execute('''
-        INSERT INTO fix_history (folder_path, old_path, new_path, old_author, new_author,
-                                old_title, new_title, status, source, fixed_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 'manual', datetime('now'))
-    ''', (old_path, old_path, new_path, old_author, new_author, old_title, new_title))
+        INSERT INTO history (book_id, old_author, old_title, new_author, new_title, old_path, new_path, status, fixed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'pending_fix', datetime('now'))
+    ''', (book_id, old_author, old_title, new_author, new_title, old_path, new_path))
 
     # Remove from queue
     c.execute('DELETE FROM queue WHERE id = ?', (queue_id,))
