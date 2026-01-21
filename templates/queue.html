@@ -1669,7 +1669,7 @@ function saveManualMatch() {
             editModal.hide();
             document.getElementById(`queue-${queueId}`).remove();
             refreshQueue();
-            showSuccess('Saved as pending fix! Go to History > Pending to apply it.', 'Saved', null, null, {url: '/history?status=pending', text: 'View Pending Fixes'});
+            showSuccess('Saved as pending fix! Go to History > Pending to apply it.', 'Saved', 5000, null, {url: '/history?status=pending', text: 'View Pending Fixes'});
         } else {
             showErrorWithHelp(data.error || 'Unknown error', 'database');
             log('Save error: ' + data.error);

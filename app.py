@@ -9036,36 +9036,69 @@ def api_manual_match():
     book_id = item['book_id']
 
     # Determine new values
+    series_name = None
+    series_num = None
+    narrator = None
+    year = None
+    
     if bookdb_result:
         new_author = bookdb_result.get('author_name') or new_author
         new_title = bookdb_result.get('name') or bookdb_result.get('title') or new_title
-        # Include series info if available
-        series_name = bookdb_result.get('series_name')
-        series_pos = bookdb_result.get('series_position')
-        if series_name and series_pos:
-            new_title = f"{new_title} ({series_name} #{int(series_pos) if series_pos == int(series_pos) else series_pos})"
+        # Extract series info separately (don't add to title - build_new_path will handle it)
+        series_name = bookdb_result.get('series') or bookdb_result.get('series_name')
+        series_num = bookdb_result.get('series_position') or bookdb_result.get('series_num')
+        narrator = bookdb_result.get('narrator')
+        year = bookdb_result.get('year') or bookdb_result.get('year_published')
 
     if not new_author or not new_title:
         conn.close()
         return jsonify({'success': False, 'error': 'Author and title required'})
 
-    # Build new path
+    # Build new path using build_new_path for consistent formatting
     config = load_config()
     library_paths = config.get('library_paths', [])
 
     # Find which library this book is in
     library_root = None
+    library_root_path = None
     for lib_path in library_paths:
         if old_path.startswith(lib_path):
             library_root = lib_path
+            library_root_path = Path(lib_path)
             break
 
-    if not library_root:
+    if not library_root or not library_root_path:
         conn.close()
         return jsonify({'success': False, 'error': 'Could not determine library root'})
 
-    # New path: Library/Author/Title
-    new_path = os.path.join(library_root, new_author, new_title)
+    # Count audio files for multi-part book detection
+    audio_file_count = None
+    old_path_obj = Path(old_path)
+    if old_path_obj.exists() and old_path_obj.is_dir():
+        try:
+            audio_files = find_audio_files(str(old_path_obj))
+            audio_file_count = len(audio_files) if audio_files else 0
+        except Exception as e:
+            logger.debug(f"Could not count audio files for {old_path_obj}: {e}")
+    
+    # Use build_new_path for consistent path building (respects naming_format config)
+    new_path = build_new_path(
+        library_root_path,
+        new_author,
+        new_title,
+        series=series_name,
+        series_num=series_num,
+        narrator=narrator,
+        year=year,
+        config=config,
+        audio_file_count=audio_file_count
+    )
+    
+    if not new_path:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Invalid author or title - cannot build path'})
+    
+    new_path = str(new_path)
 
     # Check if it would overwrite something
     if os.path.exists(new_path) and new_path != old_path:

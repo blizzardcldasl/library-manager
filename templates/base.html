@@ -530,6 +530,9 @@
             const toastContainer = document.querySelector('.toast-container');
             if (!toastContainer) return;
 
+            // Ensure duration is a valid number (Bootstrap Toast requires a number, not null)
+            const toastDuration = (duration !== null && duration !== undefined && !isNaN(duration)) ? duration : 5000;
+
             const toastId = 'toast-' + Date.now();
             const icons = {
                 success: 'bi-check-circle',
@@ -545,7 +548,7 @@
             };
 
             const toastHtml = `
-                <div id="${toastId}" class="toast" role="alert" aria-live="assertive" aria-atomic="true" data-bs-autohide="true" data-bs-delay="${duration}">
+                <div id="${toastId}" class="toast" role="alert" aria-live="assertive" aria-atomic="true" data-bs-autohide="true" data-bs-delay="${toastDuration}">
                     <div class="toast-header ${bgColors[type] || 'bg-dark'} text-white">
                         <i class="bi ${icons[type] || icons.info} me-2"></i>
                         <strong class="me-auto">${title || type.charAt(0).toUpperCase() + type.slice(1)}</strong>
@@ -571,8 +574,8 @@
         }
 
         // Convenience functions
-        function showSuccess(message, title = 'Success', duration = 3000) {
-            showToast(message, 'success', duration, title);
+        function showSuccess(message, title = 'Success', duration = 3000, details = null, link = null) {
+            showToast(message, 'success', duration, title, details, link);
         }
 
         function showError(message, title = 'Error', details = null, link = null, duration = 8000) {
