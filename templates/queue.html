@@ -1132,7 +1132,6 @@ function searchAudnexusASIN() {
             // Store result for selection
             window._audnexusResult = book;
             
-            const sourceName = book.source === 'audimeta' ? 'AudiMeta' : 'Audnexus';
             log(`${sourceName} found: ${book.author} - ${book.title} (ASIN: ${book.asin || asin})`);
         })
         .catch(e => {
